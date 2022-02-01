@@ -1,0 +1,47 @@
+pipeline{
+
+    agent any
+    environment {
+        dockerImage = ''
+        registry = 'dumx/dcl_repo:latest'
+        registryCredential = 'dockerhub_id'
+        dockerContainer = 'dcl_container'
+    }
+    stages{
+        stage('Docker image') {
+            steps {
+                script {
+                    dockerImage = docker.build registry
+                }
+            }
+        }
+        stage('Pull latest version of Docker image') {
+            steps {
+                script {
+                    docker.withRegistry('', registryCredential) {
+                        dockerImage.pull()
+                    }
+                }
+            }
+        }
+        stage('Docker Container Stop and Remove') {
+            when{
+                // Check if dcl_container is running (if running return code is 0, and if not return code is 1)
+                expression { bat(returnStatus: true, script: 'docker ps -a | findstr dcl_container') == 0 }
+            }
+            steps {
+                // Stop and Remove Docker Container with force method
+                bat 'docker rm --force dcl_container'
+            }
+
+        }
+        stage('Docker Run') {
+            steps {
+                script {
+                    // Run Docker Container from pulled image
+                    dockerImage.run("--publish 9005:9005 --rm -t --detach --name dcl_container")
+                }
+            }
+        }
+        you can add other stages below...
+    }
