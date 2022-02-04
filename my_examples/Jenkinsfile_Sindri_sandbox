@@ -1,0 +1,88 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = 'nsamardzic/python_selenium_chrome'
+        REGISTRY_CREDENTIALS = 'docker_webPortal_key'
+        DOCKER_IMAGE = 'nsamardzic/python_selenium_chrome:chrome-96'
+        DOCKER_CONTAINER = 'sindri_webPortal_chrome'
+        // GITHUB_TOKEN = credentials("gh-token-only")
+    }
+    
+    stages{
+
+        stage('Pull latest version of Docker image') {
+            steps {
+                script {
+                    // Pull docker image
+                    docker.image(DOCKER_IMAGE).pull()
+                }
+            }
+        }
+        
+        
+        stage('Get Docker data') {
+            steps {
+                // List existing Docker images and containers
+                bat 'docker images'
+                bat 'docker ps -a'
+            }
+        }
+        
+        
+        // stage('Docker Container Stop and Remove') {
+        //     when{
+        //         // Check if dcl_container is running (if running return code is 0, and if not return code is 1)
+        //         expression { 
+        //             // bat (script: 'docker ps -a | findstr sindri_webPortal_chrome' == 0, returnStatus: false
+        //             // bat(returnStatus: true, script: 'docker ps -a | findstr sindri_webPortal_chrome') == 0
+        //             bat(script: 'docker ps -a | findstr sindri_webPortal_chrome' == 0, returnStatus: false)
+        //         }
+        //     }
+        //     steps {
+        //         // Stop and Remove Docker Container with force method
+        //         bat 'docker rm --force sindri_webPortal_chrome'
+        //     }
+            
+        // }
+        
+        
+        
+        stage('Run New Docker Container') {
+            steps {
+                script {
+                    // Run new Docker Container
+                    dockerImage.run("--publish 9006:9006 -t --detach --name sindri_webPortal_chrome nsamardzic/python_selenium_chrome:chrome-96")
+                }
+            }
+        }
+        
+        
+        
+        stage('List Docker state') {
+            steps {
+                // Stop and Remove Docker Container with force method
+                bat 'docker images'
+                bat 'docker pa -a'
+            }
+            
+        }
+        
+        
+        stage('remove running continer') {
+            steps {
+                // Stop and Remove Docker Container with force method
+                bat 'docker stop sindri_webPortal_chrome && docker rm sindri_webPortal_chrome'
+            }
+            
+        }
+        
+        
+        // stage ('Copy output.csv into desired directory') {
+        //     dir("c:\\sindri_automation\\sindri_webPortal\\reports\\docker_reports") {
+        //         bat 'docker cp source-container:/sindri_webPortal/html_reports/webPortal_report.html'
+        //     }
+        // }
+        
+    }
+}

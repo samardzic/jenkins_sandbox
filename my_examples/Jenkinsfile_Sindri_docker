@@ -1,0 +1,49 @@
+pipeline{
+    
+    agent any
+    environment {
+        REGISTRY = "nsamardzic/dcl_repo:latest"
+        REGISTRY_CREDENTIALS = "dockerhub_id"
+        DOCKER_IMAGE = "nsamardzic/dcl_repo:latest"
+        DOCKER_CONTAINER = "sindri_webPortal_chrome"
+    }
+    stages{
+        // stage('Docker image') {
+        //     steps {
+        //         script {
+        //             dockerImage = docker.build registry
+        //         }
+        //     }
+        // }
+        stage('Pull latest version of Docker image') {
+            steps {
+                script {
+                    DOCKER_IMAGE.pull()
+                }
+            }
+        }
+        stage('Docker Container Stop and Remove') {
+            when{
+                // Check if dcl_container is running (if running return code is 0, and if not return code is 1)
+                expression { 
+                    bat(returnStatus: true, script: "docker ps -a | findstr "%DOCKER_CONTAINER%"") == 0
+                    // bat(returnStatus: true, script: 'docker ps -a | findstr "%DOCKER_CONTAINER%" dcl_container') == 0 
+                    }
+            }
+            steps {
+                // Stop and Remove Docker Container with force method
+                bat 'docker rm --force "%DOCKER_CONTAINER%"'
+                // bat 'docker rm --force dcl_container'
+            }
+            
+        }
+        stage('Docker Run') {
+            steps {
+                script {
+                    // Run Docker Container from pulled image
+                    dockerImage.run("--publish 9005:9005 --rm -t --detach --name "%DOCKER_CONTAINER%"")
+                }
+            }
+        }
+        // you can add other stages below...   
+    }

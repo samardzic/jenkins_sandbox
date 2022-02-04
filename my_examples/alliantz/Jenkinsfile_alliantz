@@ -1,0 +1,131 @@
+#!/usr/bin/env groovy
+
+pipeline {
+    agent any
+    environment {
+        CREDENTIALS_ID_AWS = "zzz.xxx.user"
+        ACCOUNT_ID = "735031953xxx"
+        AWS_ROLE = "ADFS-ResourceAdmin"
+        IMAGE_NAME = "${ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/dtc:dev-${currentBuild.startTimeInMillis}"
+        IMAGE_INTERMEDIATE = "${ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com/dtc:dev-intermediate"
+        HOME = "${WORKSPACE}"
+        RDS_ROOT_PASS = credentials('rds.root.password')
+        MAIN_API_KEY = credentials('apikey.main')
+    }
+    options {
+        disableConcurrentBuilds()
+        ansiColor("xterm")
+    }
+    parameters { booleanParam(name: 'IMPORT_DATA', defaultValue: false, description: 'import sqlite database')  }
+    stages {
+        stage ("Build") {
+            when { not { branch 'testdev/*' } }
+            steps {
+                script {
+                    image_intermediate = docker.build(env.IMAGE_INTERMEDIATE, '--no-cache --target=builder .')
+                    image_intermediate.inside() {
+                        sh "cp /build/result-* ${WORKSPACE}"
+                        sh "ls -lah ${WORKSPACE}"
+                    }
+					image = docker.build(env.IMAGE_NAME)
+                }
+            }
+        }
+        stage('Static Code Analysis') {
+            when { not { branch 'testdev/*' } }
+            steps {
+                script {
+                    image_intermediate.inside() {
+                        recordIssues(tools: [goVet(pattern: 'result-govet.txt')])
+                    }
+                }
+            }
+        }
+        stage ("Prepare") {
+            when { not { branch 'testdev/*' } }
+            steps {
+                script {
+                    curl_image = docker.image("common-docker-r.eu.artifactory.conti.de/curlimages/curl:latest")
+                    curl_image.inside() {
+                        sh "curl -L https://github.conti.de/continental-cloud/adfs-cli/releases/download/v1.1.2/adfs-cli-linux -o ${WORKSPACE}/adfs-cli && chmod +x adfs-cli"
+                    }
+                    withCredentials([[$class: 'UsernamePasswordMultiBinding',credentialsId: env.CREDENTIALS_ID_AWS, usernameVariable: 'ADFS_USER', passwordVariable: 'ADFS_PASS']]) {
+                        sh "cd ${WORKSPACE} && ./adfs-cli -u 'cw01\\${env.ADFS_USER}' -p '${env.ADFS_PASS}' -r 'arn:aws:iam::${env.ACCOUNT_ID}:role/${env.AWS_ROLE}'"
+                        access_key_id = sh (script: "cat ~/.aws/credentials | grep 'aws_access_key_id' | cut -d'=' -f 2-", returnStdout: true).trim()
+                        secret_access_key = sh (script: "cat ~/.aws/credentials | grep 'aws_secret_access_key' | cut -d'=' -f 2-", returnStdout: true).trim()
+                        session_token = sh (script: "cat ~/.aws/credentials | grep 'aws_session_token' | cut -d'=' -f 2-", returnStdout: true).trim()
+                    }
+                    withEnv(["AWS_ACCESS_KEY_ID=${access_key_id}", "AWS_SECRET_ACCESS_KEY=${secret_access_key}", "AWS_SESSION_TOKEN=${session_token}"]) {
+                        aws_image = docker.image("common-docker-r.eu.artifactory.conti.de/amazon/aws-cli:latest")
+                        aws_image.inside("""--entrypoint=''""") {
+                            docker_login = sh ( script: 'aws ecr get-login-password', returnStdout: true ).trim()
+                        }
+                        sh "docker login --username AWS --password ${docker_login} ${env.ACCOUNT_ID}.dkr.ecr.eu-central-1.amazonaws.com"
+                    }
+                }
+            }
+        }
+        stage ("Deploy") {
+            when { not { branch 'testdev/*' } }
+            steps {
+                script {
+                    curl_image.inside() {
+                        sh "curl -LO \"https://storage.googleapis.com/kubernetes-release/release/\$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl\" && chmod +x kubectl"
+                        sh "curl -o aws-iam-authenticator https://amazon-eks.s3.us-west-2.amazonaws.com/1.18.8/2020-09-18/bin/linux/amd64/aws-iam-authenticator && chmod +x aws-iam-authenticator"
+                    }
+                    withEnv(["AWS_ACCESS_KEY_ID=${access_key_id}", "AWS_SECRET_ACCESS_KEY=${secret_access_key}", "AWS_SESSION_TOKEN=${session_token}"]) {
+                        terraform_image = docker.image("common-docker-r.eu.artifactory.conti.de/hashicorp/terraform:latest")
+                        terraform_image.inside("""--entrypoint=''""") {
+                            sh "cd ${WORKSPACE}/deploy/terraform-ecr && terraform init && terraform apply -auto-approve"
+                        }
+                        image.push()
+                        terraform_image.inside("""--entrypoint=''""") {
+                            sh "export PATH=${PATH}i:${WORKSPACE} && cd ${WORKSPACE}/deploy/terraform-env && terraform init && terraform apply -auto-approve -var rds_root_pass=${env.RDS_ROOT_PASS} -var main_api_key=${env.MAIN_API_KEY} && sed 's/%DTC_VERSION%/dev-${currentBuild.startTimeInMillis}/g' allianz.yaml > allianz_repl.yaml && ls -lah && ${WORKSPACE}/kubectl --kubeconfig kubeconfig_dtc apply -f allianz_repl.yaml && ${WORKSPACE}/kubectl --kubeconfig kubeconfig_dtc apply -f container-insight.yaml"
+                        }
+                    }
+                }
+            }
+        }
+        stage ("Import Data") {
+        when {
+            environment name: 'IMPORT_DATA', value: "true"
+        }
+            steps {
+                script {
+                    withEnv(["AWS_ACCESS_KEY_ID=${access_key_id}", "AWS_SECRET_ACCESS_KEY=${secret_access_key}", "AWS_SESSION_TOKEN=${session_token}"]) {
+                        aws_image = docker.image("common-docker-r.eu.artifactory.conti.de/amazon/aws-cli:latest")
+                        aws_image.inside("""--entrypoint=''""") {
+                            sh "aws s3 sync s3://db-upload-20201021122253001100000002 ."
+                        }
+                    }
+                    importer_image = docker.image("735031953536.dkr.ecr.eu-central-1.amazonaws.com/sqliteimporter:latest")
+                    importer_image.pull()
+                    importer_image.inside("""--entrypoint=''""") {
+                        sh "SQLITEDB_FILE=CheckII.db SQLITEDB_PASS=`cat password.txt` MYSQL_USER=r00t MYSQL_PASS=9bxFSFanMYCVDCGYS6ouTKwax4iI03rV MYSQL_HOST=dtc.cluster-cjmcfak0u3qa.eu-central-1.rds.amazonaws.com MYSQL_DB_SUFFIX=${currentBuild.startTimeInMillis} coverage-import"
+                    }
+                }
+            }
+        }
+        stage ("Testing") {
+            when { not { branch 'testdev/*' } }
+            steps {
+                script {
+                    echo "ToDo"
+                }
+            }
+        }
+        stage ("TestDev") {
+            when { branch 'testdev/*' }
+            steps {
+                script {
+                    echo "ToDo"
+                }
+            }
+        }
+    }
+    post {
+        cleanup {
+            cleanWs()
+        }
+    }
+}
