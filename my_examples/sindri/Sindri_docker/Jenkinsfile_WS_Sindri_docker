@@ -1,0 +1,68 @@
+pipeline{
+    
+    agent any
+
+    environment {
+        REGISTRY = "nsamardzic/dcl_repo:latest"
+        REGISTRY_CREDENTIALS = "dockerhub_id"
+        DOCKER_IMAGE = "nsamardzic/python_selenium_chrome:chrome-96"
+        DOCKER_CONTAINER = "sindri_webPortal_chrome"
+        // DOCKER_IMAGE = "nsamardzic/python_selenium_firefox:firefox-96"
+        // DOCKER_CONTAINER = "sindri_webPortal_firefox"
+        // script: "docker ps -a | findstr "%DOCKER_CONTAINER%""
+        // dockerImage.run("--publish 9005:9005 --rm -t --detach --name "%DOCKER_CONTAINER%"")
+        // script {DOCKER_IMAGE.pull()}
+    }
+
+
+    parameters {
+        // string(name: "TEST_STRING", defaultValue: "staging", description: "This is for TEST_STRING")
+        string(name: "GIT_REPO", defaultValue: "https://github.geo.conti.de/uia66114/jenkins_workshop.git", description: "This is GitHub repo")
+        string(name: "CUSTOM_WS", defaultValue: "/Users/uib54845/nikola_tesla/", description: "This is custom workspace")
+        // dir("$params.CUSTOM_WS")
+        // [url: "$params.GIT_REPO"]
+        // [credentialsId: 'Jenkins_Git_Account_ID']
+    }
+
+
+    stages{
+        stage('Pull latest version of Docker image') {
+            steps {
+                script {
+                    try {
+                        DOCKER_IMAGE.pull()
+                        echo 'Docker image PULL success'
+                    } catch (err) {
+                        echo 'Docker image PULL failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                    
+                }
+            }
+        }
+        stage('Docker Container Stop and Remove') {
+            when{
+                // Check if dcl_container is running (if running return code is 0, and if not return code is 1)
+                expression { 
+                    bat(returnStatus: true, script: "docker ps -a | findstr "%DOCKER_CONTAINER%"") == 0
+                    // bat(returnStatus: true, script: 'docker ps -a | findstr "%DOCKER_CONTAINER%" dcl_container') == 0 
+                    }
+            }
+            steps {
+                // Stop and Remove Docker Container with force method
+                bat 'docker rm --force "%DOCKER_CONTAINER%"'
+                // bat 'docker rm --force dcl_container'
+            }
+            
+        }
+        stage('Docker Run') {
+            steps {
+                script {
+                    // Run Docker Container from pulled image
+                    dockerImage.run("--publish 9005:9005 --rm -t --detach --name "%DOCKER_CONTAINER%"")
+                }
+            }
+        }
+        // you can add other stages below...   
+    }
+}

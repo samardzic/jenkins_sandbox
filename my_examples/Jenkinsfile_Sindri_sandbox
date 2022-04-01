@@ -2,87 +2,177 @@ pipeline {
     agent any
     
     environment {
-        DOCKER_REGISTRY = 'nsamardzic/python_selenium_chrome'
-        REGISTRY_CREDENTIALS = 'docker_webPortal_key'
-        DOCKER_IMAGE = 'nsamardzic/python_selenium_chrome:chrome-96'
-        DOCKER_CONTAINER = 'sindri_webPortal_chrome'
-        // GITHUB_TOKEN = credentials("gh-token-only")
+        TEST_SUITE = '"emailTests"'
+        GIT_BRANCH = '*/dev_v22A_version2'
+        ROOT_PATH = 'c:\\sindri_automation\\sindri_webPortal'
     }
     
     stages{
+        
 
-        stage('Pull latest version of Docker image') {
+        
+        stage('Checkout to specific branch') {
+            options {
+                timeout(time: 30, unit: 'SECONDS')
+            }
             steps {
                 script {
-                    // Pull docker image
-                    docker.image(DOCKER_IMAGE).pull()
+                    try {
+                        sleep(time:7, unit:'SECONDS')
+                        checkout([
+                            $class: 'GitSCM', 
+                            // branches: [[name: '*/dev_v22A_version2']], 
+                            branches: [[name: env.GIT_BRANCH]], 
+                            userRemoteConfigs: [[url: 'https://github.geo.conti.de/uie21143/sindri_webPortal.git']]
+                        ])
+                        echo 'SVN checkout SUCCESS'
+                    } catch (err) {
+                        echo 'SVN checkout Failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
                 }
             }
         }
         
         
-        stage('Get Docker data') {
+        
+        stage('Pull the latest code changes') {
+            options {
+                timeout(time: 40, unit: 'SECONDS')
+            }
             steps {
-                // List existing Docker images and containers
-                bat 'docker images'
-                bat 'docker ps -a'
+                script {
+                    try {
+                        sleep(time:7, unit:'SECONDS')
+                        bat 'cd '${env.ROOT_PATH}''
+                        bat 'dir'
+                        // bat 'git pull https://e3f4235afcc86281f2a67bb9484dfde8ae1e8bae:x-oauth-basic@github.geo.conti.de/uie21143/sindri_webPortal.git'
+                        // echo 'SVN pull SUCCESS'
+                    } catch (err) {
+                        echo 'SVN pull Failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                }
             }
         }
         
         
-        // stage('Docker Container Stop and Remove') {
-        //     when{
-        //         // Check if dcl_container is running (if running return code is 0, and if not return code is 1)
-        //         expression { 
-        //             // bat (script: 'docker ps -a | findstr sindri_webPortal_chrome' == 0, returnStatus: false
-        //             // bat(returnStatus: true, script: 'docker ps -a | findstr sindri_webPortal_chrome') == 0
-        //             bat(script: 'docker ps -a | findstr sindri_webPortal_chrome' == 0, returnStatus: false)
-        //         }
+        
+        // stage('Switch WiFi to NonDomain source') {
+        //     options {
+        //         timeout(time: 120, unit: 'SECONDS')
         //     }
         //     steps {
-        //         // Stop and Remove Docker Container with force method
-        //         bat 'docker rm --force sindri_webPortal_chrome'
+        //         script {
+        //             try {
+        //                 sleep(time:7, unit:'SECONDS')
+        //                 bat 'NetSh WLAN Show All'
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'netsh wlan connect "Sindri_2G"'
+        //                 echo 'WiFi Sucessfully set to NonDomain source'
+        //             } catch (err) {
+        //                 echo 'WiFi switch to NonDomain source Failed'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
         //     }
-            
+        // }
+        
+        
+        
+        // stage('Run preconfigured Test Suite') {
+        //     options {
+        //         timeout(time: 2, unit: 'HOURS')
+        //     }
+        //     steps {
+        //         script {
+        //             try {
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'call c:\\sindri_automation\\sindri_webPortal\\venv\\Scripts\\activate.bat'
+        //                 bat 'cd c:\\sindri_automation\\sindri_webPortal'
+        //                 // bat 'c:\\sindri_automation\\sindri_webPortal\\venv\\Scripts\\pytest -m "emailTests"'
+        //                 bat 'c:\\sindri_automation\\sindri_webPortal\\venv\\Scripts\\pytest -m '${env.TEST_SUITE}''
+        //                 echo 'Test Suite execution initiated.'
+        //             } catch (err) {
+        //                 echo 'Test Suite execution failed to start'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        // stage('Send execution results') {
+        //     options {
+        //         timeout(time: 80, unit: 'SECONDS')
+        //     }
+        //     steps {
+        //         script {
+        //             try {
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'c:\\sindri_automation\\sindri_webPortal\\venv\\Scripts\\python C:\\sindri_automation\\sindri_webPortal\\tests\\email_tests\\send_email_results_hardcoded.py'
+        //                 echo 'Test execution results sent.'
+        //             } catch (err) {
+        //                 echo 'Test execution results sending failed'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
+        //     }
         // }
         
         
         
-        stage('Run New Docker Container') {
-            steps {
-                script {
-                    // Run new Docker Container
-                    dockerImage.run("--publish 9006:9006 -t --detach --name sindri_webPortal_chrome nsamardzic/python_selenium_chrome:chrome-96")
-                }
-            }
-        }
-        
-        
-        
-        stage('List Docker state') {
-            steps {
-                // Stop and Remove Docker Container with force method
-                bat 'docker images'
-                bat 'docker pa -a'
-            }
-            
-        }
-        
-        
-        stage('remove running continer') {
-            steps {
-                // Stop and Remove Docker Container with force method
-                bat 'docker stop sindri_webPortal_chrome && docker rm sindri_webPortal_chrome'
-            }
-            
-        }
-        
-        
-        // stage ('Copy output.csv into desired directory') {
-        //     dir("c:\\sindri_automation\\sindri_webPortal\\reports\\docker_reports") {
-        //         bat 'docker cp source-container:/sindri_webPortal/html_reports/webPortal_report.html'
+        // stage('Publish HTML report') {
+        //     options {
+        //         timeout(time: 120, unit: 'SECONDS')
+        //     }
+        //     steps {
+        //         script {
+        //             try {
+        //                 sleep(time:7, unit:'SECONDS')
+        //                 publishHTML([
+        //                     allowMissing: false, 
+        //                     alwaysLinkToLastBuild: false, 
+        //                     keepAll: true, 
+        //                     reportDir: 'c:\\sindri_automation\\sindri_webPortal\\reports\\html_reports\\', 
+        //                     reportFiles: 'webPortal_report.html', 
+        //                     reportName: 'Sindri_WebPortal_VV_report', 
+        //                     reportTitles: ''
+        //                 ])
+        //                 echo 'HTML report Publish SUCCESS'
+        //             } catch (err) {
+        //                 echo 'HTML report Publish FAILED'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
         //     }
         // }
+        
+        
+        
+        // stage('Set WiFi back to Company Domain source') {
+        //     options {
+        //         timeout(time: 120, unit: 'SECONDS')
+        //     }
+        //     steps {
+        //         script {
+        //             try {
+        //                 sleep(time:7, unit:'SECONDS')
+        //                 bat 'NetSh WLAN Show All'
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'netsh wlan disconnect interface="Wi-Fi"'
+        //                 echo 'WiFi Sucessfully set to Company Domain'
+        //             } catch (err) {
+        //                 echo 'WiFi switch to Company Domain Failed'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
         
     }
 }

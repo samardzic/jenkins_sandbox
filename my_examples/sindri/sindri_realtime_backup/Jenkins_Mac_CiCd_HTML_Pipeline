@@ -1,0 +1,138 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = 'nsamardzic/python_selenium_chrome'
+    }
+    
+    
+    parameters {
+        string(name: "GIT_REPO", defaultValue: "https://github.geo.conti.de/uia66114/jenkins_workshop.git", description: "This is GitHub repo")
+        string(name: "CUSTOM_WS", defaultValue: "/Users/uib54845/nikola_tesla/", description: "This is custom workspace")
+        string(name: "NODE_LOCATION", defaultValue: "/Users/uib54845/node_modules", description: "This is node_modules location")
+
+    }
+    
+    
+    stages {
+        
+        stage("Parameters Check") {
+            steps {
+                script {
+                    try {
+                        sh """
+                        uname -a
+                        java -version
+                        echo "$params.CUSTOM_WS"
+                        """
+                        echo 'Parameters shown'
+                    } catch (err) {
+                        echo 'Parameters display failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                }
+                
+            }
+        }
+        
+        
+        
+        
+        stage('Checkout to specific branch') {
+            options {
+                timeout(time: 3, unit: 'SECONDS')
+            }
+            steps {
+                script {
+                    
+                    dir("$params.CUSTOM_WS") {
+                        try {
+                            checkout([
+                                $class: 'GitSCM', 
+                                branches: [[name: '*/master']], 
+                                userRemoteConfigs: [
+                                    [url: "$params.GIT_REPO"],
+                                    [name: 'master'],
+                                    [credentialsId: 'Jenkins_Git_Account_ID'],
+                                    [refspec: '+refs/heads/master:refs/remotes/origin/master']]
+                            ])
+                            echo 'SVN checkout SUCCESS'
+                        } catch (err) {
+                            echo 'SVN checkout Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        
+        
+        
+        
+            
+            
+            
+            
+        stage('Install NPM dependencies') {
+            options {
+                timeout(time: 2, unit: 'SECONDS')
+            }
+            steps {
+                script {
+                    
+                    dir("$params.CUSTOM_WS") {
+                        try {
+                            // sleep(time:10, unit:'SECONDS')
+                            sh """
+                            ls -l
+                            
+                            npm list
+                            npm install http-server
+                            npm list
+                            """
+                            echo 'Directory listing success'
+                        } catch (err) {
+                            echo 'Directory listing success failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        stage('Run application') {
+            options {
+                timeout(time: 2, unit: 'SECONDS')
+            }
+            steps {
+                script {
+                    
+                    dir("$params.CUSTOM_WS") {
+                        try {
+                            sh """
+
+                            ls -l
+                            ./../node_modules/http-server/bin/http-server
+                            """
+                            echo 'Run server success'
+                        } catch (err) {
+                            echo 'Run server failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+    }
+}
