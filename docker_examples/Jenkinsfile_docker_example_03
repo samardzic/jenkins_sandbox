@@ -1,0 +1,72 @@
+#!/usr/bin/env groovy
+pipeline {
+    agent any
+    stages {
+        stage('Build Docker Images') {
+            steps {
+              dir ("docker/buildbase") {
+                 sh ('docker build --rm -t buildbase .')
+              }
+              dir ("docker/builder") {
+                sh ('docker build --rm -f Dockerfile.java -t javabuilder .')
+                sh ('docker build --rm -f Dockerfile.scala -t scalabuilder .')
+                sh ('docker build --rm -f Dockerfile.tarball -t tarballbuilder .')
+              }
+
+            }
+        }
+        stage('Create docker image for current job') {
+            steps {
+                sh ('$(aws ecr get-login --no-include-email --region eu-west-1)')
+                sh ("docker build --rm --build-arg JOB_NAME=${sanitisedJobName()} -t ${containerName()} .")
+            }
+        }
+        stage('Clean') {
+            steps {
+                sh ("docker run --rm -v /Users/kevj/.aws/:/root/.aws/:ro --mount source=jenkins-home,target=/example/ --user 1000 ${containerName()} rm -rf build/*")
+            }
+        }
+        stage('Test') {
+            steps {
+                sh ("docker run --rm -v /Users/kevj/.aws/:/root/.aws/:ro --mount source=jenkins-home,target=/example/ --user 1000 ${containerName()} mkdir -p build")
+                sh ("docker run --rm -v /Users/kevj/.aws/:/root/.aws/:ro --mount source=jenkins-home,target=/example/ --user 1000 ${containerName()} ./run-tests.sh")
+            }
+        }
+        stage('Push Docker Images'){
+          steps {
+            sh ('$(aws ecr get-login --no-include-email --region eu-west-1) && docker push <aws account id>.dkr.ecr.eu-west-1.amazonaws.com/buildbase:latest')
+          }
+        }
+        stage('Publish Example to s3 bucket') {
+            steps {
+                sh'aws s3 cp dist/example-0.1.$BUILD_ID.tar.gz s3://my-build-assets/example/0.1.$BUILD_ID/'
+            }
+        }
+        stage('Test package installs') {
+            steps {
+                sh ("docker run --rm -v /Users/kevj/.aws/:/root/.aws/:ro --mount source=jenkins-home,target=/example/ ${containerName()} ./run-install-test.sh 0.1.10")
+            }
+        }
+        stage('Delete docker images for this job') {
+            steps {
+                sh ("./run-cleanup.sh ${containerName()}")
+            }
+        }
+    }
+    post {
+        always {
+            junit 'build/*.xml'
+            deleteDir()
+        }
+    }
+}
+
+@NonCPS
+def containerName() {
+    env.JOB_NAME.toLowerCase().replace(" ", "-") + "-" + env.BUILD_NUMBER
+}
+
+@NonCPS
+def sanitisedJobName() {
+    env.WORKSPACE.substring(env.WORKSPACE.lastIndexOf('/') + 1, env.WORKSPACE.length())
+}
