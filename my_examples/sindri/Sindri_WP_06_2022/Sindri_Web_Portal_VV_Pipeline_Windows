@@ -1,0 +1,207 @@
+pipeline {
+    agent {
+        label 'windows'
+    }
+    
+    environment {
+        PROJECT_ROOT_PATH = "c:\\sindri_automation"
+        ROOT_PATH = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        CUSTOM_WS = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        
+        // Test Suite default = "webPortal" [webPortal, emailTests, smoke, billing, integrationTests, jnkTest]
+        // TEST_SUITE = '"webPortal or emailTests"'
+        TEST_SUITE = "jnkTest"
+        
+        // Envinronment default="cicd" [vv, dev, cicd, cicd_api]
+        TEST_ENVIRONMENT = "vv"
+        
+        // TEST_USER default="user_main" [user_main, user_jenkins, user_dragana, user_nenad, user_maja]
+        // TEST_USER = "user_main"
+        TEST_USER = "user_nenad"
+        
+        // GIT branch [main, development, refactoring_1]
+        // GIT_BRANCH = "*/main"
+        GIT_BRANCH = "main"
+        // GIT_REPO = "https://github.geo.conti.de/uie21143/sindri_webPortal.git"
+        GIT_REPO = "https://github.geo.conti.de/CVAM/Sindri-WebPortal-Automation.git"
+
+        REPORT_FILE_NAME = "webPortal_report.html"
+        REPORT_TITLE = "Sindri_WebPortal_VV_report"
+        REPORT_DIRECTORY = "c:\\sindri_automation\\Sindri-WebPortal-Automation\\reports\\html_reports\\"
+    }
+    
+    stages{
+        
+        
+        // stage('Checkout to specific branch') {
+
+        //     steps {
+        //         script {
+        //             dir("$env.CUSTOM_WS") {
+        //                 try {
+        //                     git branch: "$env.GIT_BRANCH", 
+        //                     credentialsId: 'Github_creds_ID', 
+        //                     url: "$env.GIT_REPO"
+        //                     echo 'SVN pull SUCCESS'
+        //                 } catch (err) {
+        //                     echo 'SVN pull Failed'
+        //                     currentBuild.result = 'SUCCESS'
+        //                 }
+        //             }
+        //         }
+                    
+        //     }
+        // }
+        
+        stage('Checkout to specific branch') {
+             options {
+                timeout(time: 120, unit: 'SECONDS')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                cd ${env.ROOT_PATH}
+                                git reset --hard
+                                git clean -f -d
+                                git fetch
+                                git checkout ${env.GIT_BRANCH}
+                                git pull origin ${env.GIT_BRANCH}
+                            """
+                        } catch (err) {
+                            echo 'SVN pull Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+                    
+            }
+        }
+        
+        
+
+        
+        
+        // stage('Switch WiFi to NonDomain source') {
+
+        //     steps {
+        //         script {
+        //             try {
+        //                 sleep(time:120, unit:'SECONDS')
+        //                 bat 'NetSh WLAN Show All'
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'netsh wlan connect name="Sindri_2G" interface="Wi-Fi"'
+        //                 echo 'WiFi Sucessfully set to NonDomain source'
+        //             } catch (err) {
+        //                 echo 'WiFi switch to NonDomain source Failed'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        
+        stage('Run preconfigured Test Suite') {
+            // options {
+            //     timeout(time: 2, unit: 'HOURS')
+            // }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                call ${env.ROOT_PATH}\\venv\\Scripts\\activate.bat
+                                cd ${env.ROOT_PATH}
+                                ${env.ROOT_PATH}\\venv\\Scripts\\pytest -m ${env.TEST_SUITE} --env=${env.TEST_ENVIRONMENT}
+                            """
+                            echo 'Test Suite execution initiated.'
+                        } catch (err) {
+                            echo 'Test Suite execution failed to start'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                    
+                }
+            }
+        }
+        
+        
+        
+        // stage('Send execution results') {
+            
+        //     steps {
+        //         script {
+        //             dir("$env.CUSTOM_WS") {
+        //                 try {
+        //                     sleep(time:10, unit:'SECONDS')
+        //                     bat """
+        //                         ${env.ROOT_PATH}\\venv\\Scripts\\python ${env.ROOT_PATH}\\tests\\email_tests\\send_email_results_hardcoded.py
+        //                     """
+        //                     echo 'Test execution results sent.'
+        //                 } catch (err) {
+        //                     echo 'Test execution results sending failed'
+        //                     currentBuild.result = 'SUCCESS'
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        stage('Publish HTML report') {
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            sleep(time:3, unit:'SECONDS')
+                            publishHTML([
+                                allowMissing: false, 
+                                alwaysLinkToLastBuild: false, 
+                                keepAll: true, 
+                                reportDir: "$env.REPORT_DIRECTORY", 
+                                reportFiles: "$env.REPORT_FILE_NAME", 
+                                reportName: "Sindri_WebPortal_VV_report", 
+                                reportTitles: "$env.REPORT_TITLE"
+                            ])
+                            echo 'HTML report Publish SUCCESS'
+                        } catch (err) {
+                            echo 'HTML report Publish FAILED'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        // stage('Set WiFi back to Company Domain source') {
+        //     options {
+        //         timeout(time: 60, unit: 'SECONDS')
+        //     }
+        //     steps {
+        //         script {
+        //             try {
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'NetSh WLAN Show Interface'
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'netsh wlan connect name="WLAN-G6" interface="Wi-Fi"'
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'NetSh WLAN Show Interface'
+        //             } catch (err) {
+        //                 echo 'WiFi switch to Company Domain Failed'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        
+    }
+}

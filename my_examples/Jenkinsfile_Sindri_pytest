@@ -12,6 +12,20 @@ pipeline {
     //     // choice(name: "TEST_CHOICE", choices: ["one", "two", "three"], description: "This is TEST_CHOICE")
     //     // password(name: "TEST_PASSWORD", defaultValue: "SECRET", description: "This is TEST_PASSWORD")
     // }
+
+    // parameters {
+    //     choice(
+    //         name: "TEST_SUITE", choices: ['webPortal', 'emailTests', 'smoke', 'billing', 'integrationTests', 'jnkTest'],
+    //         description: 'Available test suites')
+    //     choice(
+    //         name: "TEST_ENVIRONMENT", choices: ['vv', 'dev', 'cicd', 'cicd_api'],
+    //         description: 'Available envinronments for test execution')
+    //     string(name: "TESTs", defaultValue: "example text", description: "This is for TEST_STRING") 
+    //     text(name: "Something", defaultValue: "One\nTwo\nThree\n", description: "This is for TEST_TEXT")
+    //     // booleanParam(name: "TEST_BOOLEAN", defaultValue: true, description: "This is for TEST_BOOLEAN")
+    //     // choice(name: "LOCATION", choices: ["one1", "two2", "three3"], description: "This is TEST_CHOICE")
+    //     // password(name: "TEST_PASSWORD", defaultValue: "SECRET", description: "This is TEST_PASSWORD")
+    // }
     
     stages{
         

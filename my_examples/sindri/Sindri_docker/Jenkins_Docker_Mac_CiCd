@@ -1,0 +1,114 @@
+pipeline {
+    
+    
+    agent {
+        docker { 
+            image 'maven:3-alpine'
+            // label 'my-defined-label'
+            // args  '-v /tmp:/tmp'
+        }
+    }
+    
+    
+    environment {
+        CUSTOM_WS = "c:\\sindri_automation\\sindri_webPortal"
+        REGISTRY = 'nsamardzic/python_selenium_chrome:chrome-91'
+        REGISTRY_CREDENTIALS = credentials('docker_webPortal_key')
+        DOCKER_IMAGE = 'nsamardzic/python_selenium_chrome:chrome-91'
+        DOCKER_CONTAINER = "sindri_webPortal_chrome"
+    }
+    
+    
+    stages {
+
+
+        stage("Docker image pull"){        
+        
+            steps {
+                script {
+                    
+                    // DOCKER_IMAGE.pull()
+                    // echo 'whoami'
+                    sh 'ls -l'
+                    // sh ("docker build --rm --build-arg JOB_NAME=${sanitisedJobName()} -t ${containerName()} .")
+                    sh 'mvn --version'
+                    // dockerImage.run("--publish 9005:9005 --rm -t --detach --name dcl_container33")
+                }
+            }
+        }
+        
+        
+        
+        // steps {
+        //     script {
+        //         dir("$env.CUSTOM_WS") {
+        //             // DOCKER_IMAGE.pull()
+        //             // echo 'whoami'
+        //             // bat 'ls -l'
+        //             // sh ("docker build --rm --build-arg JOB_NAME=${sanitisedJobName()} -t ${containerName()} .")
+        //             sh 'mvn -B clean faric8:build faric8:deploy verify'
+        //             // dockerImage.run("--publish 9005:9005 --rm -t --detach --name dcl_container33")
+        //         }
+        //     }
+        // }
+        
+        
+        
+        // stage('Docker image') {
+        //     steps {
+        //         script {
+        //             // DOCKER_IMAGE = docker.build REGISTRY
+        //             // DOCKER_IMAGE.pull()
+        //             withDockerContainer('nsamardzic/python_selenium_chrome') {
+        //             // some block
+        //                 sh "docker run --name nsamardzic/python_selenium_chrome --rm -p 8082:8080 jenkins:jcasc"
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        // stage('Pull latest version of Docker image') {
+        //     steps {
+        //         script {
+        //             docker.withRegistry('', REGISTRY_CREDENTIALS) {
+        //                 DOCKER_IMAGE.pull()
+        //             }
+        //         }
+        //     }
+        // }
+        
+        // stage('Docker pull') {
+            
+        //     steps {
+        //         script {
+        //             DOCKER_IMAGE.pull()
+        //         }
+        //     }
+            
+        // }
+        
+        
+        
+        // stage('Docker init') {
+            
+        //     // agent {
+        //     //     docker { 
+        //     //         // image 'maven:3-alpine'
+        //     //         image 'node:7-alpine'
+        //     //     }
+        //     // }
+            
+            
+            
+
+            
+            
+            
+        // }
+        
+        
+    }
+    
+    
+}
