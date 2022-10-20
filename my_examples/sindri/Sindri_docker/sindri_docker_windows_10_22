@@ -1,0 +1,251 @@
+
+pipeline {
+    agent any
+    
+    environment {
+        // Test Suite default = "webPortal" [webPortal, emailTests, smoke, billing, integrationTests, jnkTest]
+        // TEST_SUITE = '"webPortal or emailTests"'
+        TEST_SUITE = "jnkTest"
+        
+        // Envinronment default="cicd" [vv, dev, cicd, cicd_api]
+        TEST_ENVIRONMENT = "vv"
+        
+        // TEST_USER default="user_main" [user_main, user_jenkins, user_dragana, user_nenad, user_maja]
+        TEST_USER = "user_jenkins"
+        
+        // TEST_BROWSER default="chrome" [chrome, firefox, safari, ie, edge]
+;       TEST_BROWSER = "chrome"
+        
+        // GIT branch [main, development]
+        GIT_WP_BRANCH = "development"
+        GIT_REPO = "https://github.geo.conti.de/CVAM/Sindri-WebPortal-Automation.git"
+        
+        PROJECT_ROOT_PATH = "c:\\sindri_automation"
+        ROOT_PATH = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        CUSTOM_WS = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        // DOCKER_REGISTRY = "nsamardzic/python_selenium_firefox"
+        // REGISTRY_CREDENTIALS = "docker_webPortal_key"
+        DOCKER_IMAGE = "sindri/sindri_chrome_jenkins:automation"
+        DOCKER_CONTAINER = "sindri_chrome_container"
+        DOCKERFILE_PATH = "C:\\sindri_automation"
+        DOCKERFILE_NAME = "sindri_web_portal.Dockerfile"
+        REPORT_FILE_NAME = "webPortal_report.html"
+        REPORT_TITLE = "Sindri_WebPortal_VV_report"
+        REPORT_DIRECTORY = "c:\\sindri_automation\\docker_report"
+        
+        GIT_WP_USERNAME  = credentials('WP_Docker_Git_UserName_ID')
+        GIT_WP_PASSWORD  = credentials('WP_Docker_Git_Password_ID')
+    }
+    
+    
+    stages{
+
+        
+        stage('Create report directory') {
+            steps {
+                script{
+                    try {
+                        bat """
+                            If exist ${env.REPORT_DIRECTORY} (Echo "Directory created") Else (mkdir ${env.REPORT_DIRECTORY})
+                        """
+                    } catch (err) {
+                        echo 'Report directory creation Failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                }
+            }
+        }
+        
+        
+        stage('Clean Workspace') {
+            steps {
+                script{
+                    try {
+                        cleanWs()
+                    } catch (err) {
+                        echo 'Clean Workspace Failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        
+        stage('Stop and Remove Docker container') {
+            steps {
+                script{
+                    try {
+                        bat "docker ps -a"
+                        def containerExists = bat(script: "docker ps ${env.DOCKER_CONTAINER}", returnStdout: true) == 0
+                        // if(!containerExists){
+                        if(containerExists){
+                            echo 'Cleaning up running container'
+                            bat """
+                                docker stop ${env.DOCKER_CONTAINER}
+                                docker rm --force ${env.DOCKER_CONTAINER}
+
+                            """
+                            }
+                    } catch (err) {
+                        echo 'Container is not running'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        stage('Docker container cleanup') {
+            steps {
+                script{
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                docker rmi --force ${env.DOCKER_IMAGE}
+                            """
+                            
+                        } catch (err) {
+                            echo 'Docker container cleanup Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        // stage('Build Docker image') {
+        //     steps {
+        //         script{
+        //             dir("$env.CUSTOM_WS") {
+        //                 try {
+        //                     bat """
+        //                         docker build \
+        //                             --file ${env.DOCKERFILE_PATH}\\${env.DOCKERFILE_NAME} \
+        //                             --tag ${env.DOCKER_IMAGE} . \
+        //                             --build-arg GIT_USERNAME=${env.GIT_WP_USERNAME} \
+        //                             --build-arg GIT_PASSWORD=${env.GIT_WP_PASSWORD} \
+        //                             --build-arg GIT_BRANCH=${env.GIT_WP_BRANCH} \
+        //                             --compress
+        //                     """
+        //                 } catch (err) {
+        //                     echo 'Docker image Build Failed'
+        //                     currentBuild.result = 'SUCCESS'
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        
+        // stage('Docker Run') {
+        //     steps {
+        //         script {
+        //             dir("$env.CUSTOM_WS") {
+        //                 try {
+        //                     bat """
+        //                         docker run -t --detach --name ${env.DOCKER_CONTAINER} ${env.DOCKER_IMAGE}
+        //                         docker ps -a
+        //                         docker images
+        //                         """
+        //                 } catch (err) {
+        //                     echo 'Docker Run Failed'
+        //                     currentBuild.result = 'SUCCESS'
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        
+        // stage('Execute Test Suite') {
+        //     steps {
+        //         script {
+        //             dir("$env.CUSTOM_WS") {
+        //                 try {
+        //                     bat """
+        //                         docker exec -w /Sindri-WebPortal-Automation ${env.DOCKER_CONTAINER} \
+        //                         pytest \
+        //                             --reruns 1 --reruns-delay 5 \
+        //                             -m ${env.TEST_SUITE} \
+        //                             --browser=${env.TEST_BROWSER} \
+        //                             --env=${env.TEST_ENVIRONMENT} \
+        //                             --user=${env.TEST_USER} \
+        //                             --html=/Sindri-WebPortal-Automation/reports/html_reports/webPortal_report.html
+        //                         """
+        //                 } catch (err) {
+        //                     echo 'Test Suite Execution Failed'
+        //                     currentBuild.result = 'SUCCESS'
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        
+        // stage('Extract text execution report') {
+        //     steps {
+        //         script {
+        //             dir("$env.CUSTOM_WS") {
+        //                 try {
+        //                     bat """
+        //                         docker cp ${env.DOCKER_CONTAINER}:/Sindri-WebPortal-Automation/reports/html_reports/webPortal_report.html ${env.REPORT_DIRECTORY}
+        //                         """
+        //                 } catch (err) {
+        //                     echo 'Execution report extraction Failed'
+        //                     currentBuild.result = 'SUCCESS'
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        // stage('Publish HTML report') {
+        //     steps {
+        //         script {
+        //             try {
+        //                 publishHTML([
+        //                     allowMissing: false, 
+        //                     alwaysLinkToLastBuild: false, 
+        //                     keepAll: true, 
+        //                     reportDir: "$env.REPORT_DIRECTORY", 
+        //                     reportFiles: "$env.REPORT_FILE_NAME", 
+        //                     reportName: "Sindri_WebPortal_VV_report", 
+        //                     reportTitles: "$env.REPORT_TITLE"
+        //                 ])
+        //                 echo 'HTML report Publish SUCCESS'
+        //             } catch (err) {
+        //                 echo 'HTML report Publish FAILED'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        
+        
+    }
+    
+}
+
