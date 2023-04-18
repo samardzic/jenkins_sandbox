@@ -1,0 +1,24 @@
+Started by user [8mha:////4NHPc4yTCbw1N3zP96HiFPab0D/frKodkaLVmKNo0hW7AAAAmB+LCAAAAAAAAP9b85aBtbiIQTGjNKU4P08vOT+vOD8nVc83PyU1x6OyILUoJzMv2y+/JJUBAhiZGBgqihhk0NSjKDWzXb3RdlLBUSYGJk8GtpzUvPSSDB8G5tKinBIGIZ+sxLJE/ZzEvHT94JKizLx0a6BxUmjGOUNodHsLgAzOEgZ+/dLi1CJ9oAtz4kEsABDMBqDEAAAA[0mDell User
+Running as SYSTEM
+Building in workspace c:\Users\uia66114\.jenkins\workspace\example_project
+[example_project] $ cmd /c call C:\Users\uia66114\AppData\Local\Temp\jenkins4200955939743234023.bat
+
+[1;32;40m→ [1;36;40mc:\Users\uia66114\.jenkins\workspace\example_project[1;35;40m› [1;37;40mcd c:\sindri_automation\db_cleanup\ 
+
+[1;32;40m→ [1;36;40mc:\sindri_automation\db_cleanup[1;35;40m› [1;37;40mdir
+ Volume in drive C is OSDISK
+ Volume Serial Number is E8FC-304F
+
+ Directory of c:\sindri_automation\db_cleanup
+
+03/15/2022  02:01 PM    <DIR>          .
+03/15/2022  02:01 PM    <DIR>          ..
+09/23/2021  12:22 PM             3,310 db.sh
+03/15/2022  02:01 PM             2,196 db_delete_data.md
+09/23/2021  09:48 AM                84 exec.sh
+01/19/2022  01:02 PM               709 howTo.md
+               4 File(s)          6,299 bytes
+               2 Dir(s)  87,705,341,952 bytes free
+
+[1;32;40m→ [1;36;40mc:\sindri_automation\db_cleanup[1;35;40m› [1;37;40mexit 0 
+Finished: SUCCESS

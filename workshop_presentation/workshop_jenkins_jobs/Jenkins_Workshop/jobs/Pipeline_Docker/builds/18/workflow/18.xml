@@ -1,0 +1,36 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<Tag plugin="workflow-support@815.vd60466279fc8">
+  <node class="cps.n.StepEndNode" plugin="workflow-cps@2683.vd0a_8f6a_1c263">
+    <parentIds>
+      <string>17</string>
+    </parentIds>
+    <id>18</id>
+    <startId>9</startId>
+  </node>
+  <actions>
+    <wf.a.TimingAction plugin="workflow-api@1143.v2d42f1e9dea_5">
+      <startTime>1649011871294</startTime>
+    </wf.a.TimingAction>
+    <wf.a.ErrorAction plugin="workflow-api@1143.v2d42f1e9dea_5">
+      <error class="hudson.AbortException">
+        <detailMessage>script returned exit code 1</detailMessage>
+        <stackTrace>
+          <trace>org.jenkinsci.plugins.workflow.steps.durable_task.DurableTaskStep$Execution.handleExit(DurableTaskStep.java:664)</trace>
+          <trace>org.jenkinsci.plugins.workflow.steps.durable_task.DurableTaskStep$Execution.check(DurableTaskStep.java:610)</trace>
+          <trace>org.jenkinsci.plugins.workflow.steps.durable_task.DurableTaskStep$Execution.run(DurableTaskStep.java:554)</trace>
+          <trace>java.util.concurrent.Executors$RunnableAdapter.call(Unknown Source)</trace>
+          <trace>java.util.concurrent.FutureTask.run(Unknown Source)</trace>
+          <trace>java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.access$201(Unknown Source)</trace>
+          <trace>java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(Unknown Source)</trace>
+          <trace>java.util.concurrent.ThreadPoolExecutor.runWorker(Unknown Source)</trace>
+          <trace>java.util.concurrent.ThreadPoolExecutor$Worker.run(Unknown Source)</trace>
+          <trace>java.lang.Thread.run(Unknown Source)</trace>
+        </stackTrace>
+        <suppressedExceptions class="java.util.Collections$UnmodifiableRandomAccessList" resolves-to="java.util.Collections$UnmodifiableList">
+          <c class="list"/>
+          <list reference="../c"/>
+        </suppressedExceptions>
+      </error>
+    </wf.a.ErrorAction>
+  </actions>
+</Tag>

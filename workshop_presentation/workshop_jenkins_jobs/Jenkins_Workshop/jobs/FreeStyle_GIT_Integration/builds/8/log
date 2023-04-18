@@ -1,0 +1,81 @@
+Started by user [8mha:////4EjV+lk7ENazSr4U8U4axxDSFCUzgUE0ydRRnBf91Q1zAAAAmB+LCAAAAAAAAP9b85aBtbiIQTGjNKU4P08vOT+vOD8nVc83PyU1x6OyILUoJzMv2y+/JJUBAhiZGBgqihhk0NSjKDWzXb3RdlLBUSYGJk8GtpzUvPSSDB8G5tKinBIGIZ+sxLJE/ZzEvHT94JKizLx0a6BxUmjGOUNodHsLgAz+EgZ+/dLi1CJ9oAtz4kEsAAPH2j3EAAAA[0mLocal Dell User
+Running as SYSTEM
+Building in workspace c:\Jenkins_Jobs
+[WS-CLEANUP] Deleting project workspace...
+[WS-CLEANUP] Deferred wipeout is used...
+[WS-CLEANUP] Done
+The recommended git tool is: NONE
+No credentials specified
+Cloning the remote Git repository
+Cloning repository https://github.com/Genymobile/scrcpy.git
+ > git.exe init c:\Jenkins_Jobs # timeout=10
+Fetching upstream changes from https://github.com/Genymobile/scrcpy.git
+ > git.exe --version # timeout=10
+ > git --version # 'git version 2.33.0.windows.1'
+ > git.exe fetch --tags --force --progress -- https://github.com/Genymobile/scrcpy.git +refs/heads/*:refs/remotes/origin/* # timeout=10
+ > git.exe config remote.origin.url https://github.com/Genymobile/scrcpy.git # timeout=10
+ > git.exe config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/* # timeout=10
+Avoid second fetch
+ > git.exe rev-parse "refs/remotes/origin/master^{commit}" # timeout=10
+Checking out Revision 2edc73e4b80d35acc594adef2d35d99e743befed (refs/remotes/origin/master)
+ > git.exe config core.sparsecheckout # timeout=10
+ > git.exe checkout -f 2edc73e4b80d35acc594adef2d35d99e743befed # timeout=10
+Commit message: "Improve README.zh-Hans.md"
+ > git.exe rev-list --no-walk 2edc73e4b80d35acc594adef2d35d99e743befed # timeout=10
+[8mha:////4JOfgrxPR/2neEyI7dRVPOrn0tOAkPlbcT6Am4qqz0wqAAAAqx+LCAAAAAAAAP9b85aBtbiIQSujNKU4P0+vIKc0PTOvWC8xrzgzOT8nv0gvMbkkEyjhCKb88ktSdwVsu2efuqidiYHRh4EDIu2ZUsIg5JOVWJaon5OYl64fXFKUmZduXVHEIAU1ODk/rzg/J1XPGUKDDGKAAEYmBoaKghIGFTOD1BQLE/Nk3WSTpERdE0uLVF0LU3MLXZPk5GTLFEMzgzQjIwDcH7dhrwAAAA==[0m[Jenkins_Jobs] $ cmd /c call C:\Users\uia66114\AppData\Local\Temp\jenkins111725796124614055.bat
+
+[1;32;40m→ [1;36;40mc:\Jenkins_Jobs[1;35;40m› [1;37;40mcd c:\Jenkins_Jobs 
+
+[1;32;40m→ [1;36;40mc:\Jenkins_Jobs[1;35;40m› [1;37;40mdir
+ Volume in drive C is OSDISK
+ Volume Serial Number is E8FC-304F
+
+ Directory of c:\Jenkins_Jobs
+
+04/03/2022  01:20 PM    <DIR>          .
+04/03/2022  01:20 PM    <DIR>          ..
+04/03/2022  01:20 PM    <DIR>          .github
+04/03/2022  01:20 PM                92 .gitignore
+04/03/2022  01:20 PM    <DIR>          app
+04/03/2022  01:20 PM    <DIR>          assets
+04/03/2022  01:20 PM               655 build.gradle
+04/03/2022  01:20 PM             7,454 BUILD.md
+04/03/2022  01:20 PM               969 bump_version
+04/03/2022  01:20 PM    <DIR>          config
+04/03/2022  01:20 PM               653 cross_win32.txt
+04/03/2022  01:20 PM               667 cross_win64.txt
+04/03/2022  01:20 PM            13,191 DEVELOP.md
+04/03/2022  01:20 PM             8,387 FAQ.it.md
+04/03/2022  01:20 PM             2,970 FAQ.ko.md
+04/03/2022  01:20 PM             9,642 FAQ.md
+04/03/2022  01:20 PM             9,262 FAQ.zh-Hans.md
+04/03/2022  01:20 PM    <DIR>          gradle
+04/03/2022  01:20 PM               749 gradle.properties
+04/03/2022  01:20 PM             5,947 gradlew
+04/03/2022  01:20 PM             3,056 gradlew.bat
+04/03/2022  01:20 PM               692 install_release.sh
+04/03/2022  01:20 PM            11,591 LICENSE
+04/03/2022  01:20 PM               398 meson.build
+04/03/2022  01:20 PM               899 meson_options.txt
+04/03/2022  01:20 PM            35,750 README.de.md
+04/03/2022  01:20 PM            21,452 README.id.md
+04/03/2022  01:20 PM            26,657 README.it.md
+04/03/2022  01:20 PM            30,381 README.jp.md
+04/03/2022  01:20 PM            17,255 README.ko.md
+04/03/2022  01:20 PM            33,184 README.md
+04/03/2022  01:20 PM            25,668 README.pt-br.md
+04/03/2022  01:20 PM            31,337 README.sp.md
+04/03/2022  01:20 PM            25,614 README.tr.md
+04/03/2022  01:20 PM            29,413 README.zh-Hans.md
+04/03/2022  01:20 PM            20,282 README.zh-Hant.md
+04/03/2022  01:20 PM             6,160 release.mk
+04/03/2022  01:20 PM                33 release.sh
+04/03/2022  01:20 PM               583 run
+04/03/2022  01:20 PM    <DIR>          scripts
+04/03/2022  01:20 PM    <DIR>          server
+04/03/2022  01:20 PM                19 settings.gradle
+              33 File(s)        381,062 bytes
+               9 Dir(s)  77,934,202,880 bytes free
+
+[1;32;40m→ [1;36;40mc:\Jenkins_Jobs[1;35;40m› [1;37;40mexit 0 
+Finished: SUCCESS

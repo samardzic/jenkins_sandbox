@@ -1,0 +1,139 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-build plugin="workflow-job@1174.vdcb_d054cf74a_">
+  <actions>
+    <hudson.model.CauseAction>
+      <causeBag class="linked-hash-map">
+        <entry>
+          <hudson.model.Cause_-UserIdCause>
+            <userId>dell_user</userId>
+          </hudson.model.Cause_-UserIdCause>
+          <int>1</int>
+        </entry>
+      </causeBag>
+    </hudson.model.CauseAction>
+    <org.jenkinsci.plugins.workflow.libs.LibrariesAction plugin="workflow-cps-global-lib@564.ve62a_4eb_b_e039">
+      <libraries/>
+    </org.jenkinsci.plugins.workflow.libs.LibrariesAction>
+    <jenkins.model.InterruptedBuildAction>
+      <causes>
+        <jenkins.model.CauseOfInterruption_-UserInterruption>
+          <user>dell_user</user>
+        </jenkins.model.CauseOfInterruption_-UserInterruption>
+      </causes>
+    </jenkins.model.InterruptedBuildAction>
+  </actions>
+  <queueId>510</queueId>
+  <timestamp>1649428119825</timestamp>
+  <startTime>1649428119838</startTime>
+  <result>ABORTED</result>
+  <duration>247976386</duration>
+  <charset>UTF-8</charset>
+  <keepLog>false</keepLog>
+  <execution class="org.jenkinsci.plugins.workflow.cps.CpsFlowExecution">
+    <result>ABORTED</result>
+    <script>
+def AGENT_LABEL = null
+
+node(&apos;MacMini_Sindri_8gb_Slave&apos;) {
+  stage(&apos;Checkout and set agent&apos;){
+      sh &apos;ls -l ~/ &gt;&gt; ~/content2.log&apos;
+      sh &apos;cat ~/content2.log&apos;
+    //  ### Or just use any other approach to figure out agent label: read file, etc
+    //  if (env.BRANCH_NAME == &apos;master&apos;) {
+    //     AGENT_LABEL = &quot;prod&quot;
+    //  } else {
+    //     AGENT_LABEL = &quot;dev&quot;
+    //  }
+   }
+}
+
+
+
+
+
+
+
+// pipeline {
+    
+    
+//     agent {
+//         // label &apos;Voyo_Agent&apos;
+//         label &apos;MacMini_Sindri_8gb_Slave&apos;
+//     }
+    
+    // environment {
+    //     GIT_REPO = &quot;https://github.com/Genymobile/scrcpy.git&quot;
+    //     CUSTOM_WS = &quot;/home/voyo/jenkins_jobs&quot;
+    // }
+    
+    
+    // stages {
+        
+    //     stage(&apos;Change to HOME directory&apos;) {
+    //         steps {
+    //             sh &apos;cd ~&apos;
+    //         }
+    //     }
+        
+        
+        
+        // stage(&apos;List content&apos;) {
+        //     steps {
+        //         sh &apos;pwd&apos;
+        //         sh &apos;ls -l /home/voyo &gt;&gt; ~/content2.log&apos;
+        //         sh &apos;cat ~/content2.log&apos;
+        //         sh &apos;pwd&apos;
+        //     }
+            
+        // }
+        
+        
+        
+//         stage(&apos;Check Git version&apos;) {
+//             steps {
+//                 sh &apos;git --version&apos;
+//             }
+            
+//         }
+        
+        
+//     }
+    
+    
+// }
+
+
+</script>
+    <loadedScripts class="map"/>
+    <durabilityHint>MAX_SURVIVABILITY</durabilityHint>
+    <timings class="map">
+      <entry>
+        <string>flowNode</string>
+        <long>184651300</long>
+      </entry>
+      <entry>
+        <string>classLoad</string>
+        <long>642449800</long>
+      </entry>
+      <entry>
+        <string>run</string>
+        <long>320851400</long>
+      </entry>
+      <entry>
+        <string>parse</string>
+        <long>1004226900</long>
+      </entry>
+      <entry>
+        <string>saveProgram</string>
+        <long>44775300</long>
+      </entry>
+    </timings>
+    <sandbox>true</sandbox>
+    <iota>5</iota>
+    <head>1:5</head>
+    <done>true</done>
+    <resumeBlocked>false</resumeBlocked>
+  </execution>
+  <completed>true</completed>
+  <checkouts class="hudson.util.PersistedList"/>
+</flow-build>

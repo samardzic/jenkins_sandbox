@@ -1,0 +1,31 @@
+pipeline {
+
+    agent any
+
+
+    environment {
+        SOURCED_JENKINS_FILE = "This is externaly sourced Jenkins file"
+    }
+
+    stages{
+        
+        stage('Check for Evninronmen variable functionality') {
+            steps {
+                echo "Jenkins_file = ${env.SOURCED_JENKINS_FILE}"
+            }
+        }
+        
+        
+        stage('List the directory content') {
+            steps {
+                bat "dir c:\\sindri_automation\\"
+            }
+            
+        }
+        
+        
+    }
+    
+    
+    
+}
