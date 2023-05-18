@@ -1,0 +1,16 @@
+node{
+  environment{
+    PATH = "C:/Program Files/apache-maven-3.6.3/bin:$PATH"
+  }
+  stage('clone code'){
+
+    git credentialsId: '2b40a2d6-aa64-49da-8452-2a1f40915409', url: 'https://github.com/samardzic/api_automation'
+
+  }
+  stage('build code'){
+
+    bat "mvn clean install"
+
+
+  }
+}

@@ -1,0 +1,1 @@
+java -jar agent.jar -jnlpUrl http://nhd1965w:9000/computer/Windows%%5FNHD1965w%%5FCICD%%5FSlave/jenkins-agent.jnlp -secret 43ae31531b9d2236d12d6e3ed4f07c309734be5a65926fea59999393eb20a24b -workDir "C:\jenkins_local"

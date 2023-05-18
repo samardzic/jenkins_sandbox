@@ -1,0 +1,35 @@
+pipeline {
+    agent {
+        label 'cicd3_win_nhd2322w'
+    }
+    
+    
+    stages{
+        
+        stage("Execute WebPortal Job"){
+            steps{
+                build job: "Sindri_WebPortal_MAIN_Windows",
+                parameters: [
+                    // ['webPortal', 'webShop', 'jnkTest', 'smoke', 'deleteAPI', 'billing', 'integrationTests', 'emailTests']
+                    string(name: 'TEST_SUITE', value:'jnkTest'),
+                    
+                    // ['vv', 'cicd', 'dev', 'cicd_api']
+                    string(name: 'TEST_ENVIRONMENT', value:'cicd'),
+                    
+                    // ['main', 'development', 'active_dev']
+                    string(name: 'GIT_BRANCH', value:'active_dev'),
+                    
+                    // ['user_main', 'user_jenkins', 'user_nenad', 'user_api', 'user_dragana', 'user_maja']
+                    string(name: 'TEST_USER', value:'user_main'),
+                    
+                    // ['chrome', 'firefox', 'safari', 'ie', 'edge']
+                    string(name: 'TEST_BROWSER', value:'chrome'),
+                    
+                    booleanParam(name: 'SEND_EXECUTION_RESULTS', value:false),
+                    booleanParam(name: 'PUBLISH_API_LOGS', value:false)
+                    ],
+                wait: true
+            }
+        }
+    }
+}

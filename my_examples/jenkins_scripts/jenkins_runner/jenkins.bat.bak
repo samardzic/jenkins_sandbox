@@ -1,0 +1,33 @@
+:: ==================================================================================
+:: NAME     : Jenkins runner
+:: VERSION  : 0.0.1
+:: ==================================================================================
+@echo off
+
+set JENKINS_PORT_ID=9000
+set JENKINS_LOCATION=C:\Jenkins
+set JENKINS_PORT=--httpPort=9000
+set JENKINS_OPTIONS=--enable-future-java
+
+
+
+
+:: Starting JENKINS automation server
+:: /************************************************************************************/
+echo.
+ECHO ===== Starting JENKINS on =====
+echo.
+
+echo.
+ECHO ===== Navigate JENKINS localhost:%JENKINS_PORT_ID% =====
+echo.
+
+
+
+cd %JENKINS_LOCATION%
+
+ECHO --- Jenkins server run ---
+call java -jar %JENKINS_LOCATION%\jenkins.war %JENKINS_OPTIONS% %JENKINS_PORT%
+:: call start cmd /k java -jar %JENKINS_LOCATION%\jenkins.war %JENKINS_OPTIONS% %JENKINS_PORT%
+echo.
+:: /************************************************************************************/
