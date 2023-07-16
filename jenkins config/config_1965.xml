@@ -1,0 +1,85 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<hudson>
+  <disabledAdministrativeMonitors>
+    <string>jenkins.monitor.JavaVersionRecommendationAdminMonitor</string>
+    <string>jenkins.diagnostics.ControllerExecutorsNoAgents</string>
+    <string>jenkins.security.ResourceDomainRecommendation</string>
+    <string>jenkins.security.QueueItemAuthenticatorMonitor</string>
+    <string>jenkins.diagnostics.ControllerExecutorsAgents</string>
+    <string>hudson.diagnosis.ReverseProxySetupMonitor</string>
+  </disabledAdministrativeMonitors>
+  <version>2.333</version>
+  <numExecutors>5</numExecutors>
+  <mode>NORMAL</mode>
+  <useSecurity>true</useSecurity>
+  <authorizationStrategy class="hudson.security.ProjectMatrixAuthorizationStrategy">
+    <permission>USER:com.cloudbees.plugins.credentials.CredentialsProvider.Create:generic_jenkins_user</permission>
+    <permission>USER:com.cloudbees.plugins.credentials.CredentialsProvider.Delete:generic_jenkins_user</permission>
+    <permission>USER:com.cloudbees.plugins.credentials.CredentialsProvider.Update:generic_jenkins_user</permission>
+    <permission>USER:com.cloudbees.plugins.credentials.CredentialsProvider.View:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Computer.Build:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Computer.Configure:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Computer.Connect:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Computer.Create:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Computer.Disconnect:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Hudson.Administer:admin</permission>
+    <permission>USER:hudson.model.Hudson.Administer:nenads</permission>
+    <permission>USER:hudson.model.Hudson.Administer:sindri_cicd</permission>
+    <permission>USER:hudson.model.Hudson.Read:adrian_roman</permission>
+    <permission>USER:hudson.model.Hudson.Read:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Item.Build:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Item.Cancel:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Item.Configure:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Item.Create:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Item.Move:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.Item.Read:adrian_roman</permission>
+    <permission>USER:hudson.model.Item.Read:generic_jenkins_user</permission>
+    <permission>USER:hudson.model.View.Read:adrian_roman</permission>
+    <permission>USER:hudson.model.View.Read:generic_jenkins_user</permission>
+    <permission>USER:hudson.scm.SCM.Tag:generic_jenkins_user</permission>
+  </authorizationStrategy>
+  <securityRealm class="hudson.security.HudsonPrivateSecurityRealm">
+    <disableSignup>true</disableSignup>
+    <enableCaptcha>false</enableCaptcha>
+  </securityRealm>
+  <disableRememberMe>false</disableRememberMe>
+  <projectNamingStrategy class="jenkins.model.ProjectNamingStrategy$DefaultProjectNamingStrategy"/>
+  <workspaceDir>${JENKINS_HOME}/workspace/${ITEM_FULL_NAME}</workspaceDir>
+  <buildsDir>${ITEM_ROOTDIR}/builds</buildsDir>
+  <markupFormatter class="hudson.markup.EscapedMarkupFormatter"/>
+  <jdks>
+    <jdk>
+      <name>java_11</name>
+      <home>C:\Program Files\Java\jdk_11</home>
+      <properties/>
+    </jdk>
+    <jdk>
+      <name>java_12</name>
+      <home>C:\Program Files\Java\jdk_13</home>
+      <properties/>
+    </jdk>
+  </jdks>
+  <viewsTabBar class="hudson.views.DefaultViewsTabBar"/>
+  <myViewsTabBar class="hudson.views.DefaultMyViewsTabBar"/>
+  <clouds/>
+  <quietPeriod>5</quietPeriod>
+  <scmCheckoutRetryCount>0</scmCheckoutRetryCount>
+  <views>
+    <hudson.model.AllView>
+      <owner class="hudson" reference="../../.."/>
+      <name>all</name>
+      <filterExecutors>false</filterExecutors>
+      <filterQueue>false</filterQueue>
+      <properties class="hudson.model.View$PropertyList"/>
+    </hudson.model.AllView>
+  </views>
+  <primaryView>all</primaryView>
+  <slaveAgentPort>22</slaveAgentPort>
+  <label>nhd_1965w</label>
+  <crumbIssuer class="hudson.security.csrf.DefaultCrumbIssuer">
+    <excludeClientIPFromCrumb>false</excludeClientIPFromCrumb>
+  </crumbIssuer>
+  <nodeProperties/>
+  <globalNodeProperties/>
+  <nodeRenameMigrationNeeded>false</nodeRenameMigrationNeeded>
+</hudson>
