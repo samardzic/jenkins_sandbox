@@ -1,0 +1,111 @@
+Jenkins Build Periodically - Schedule
+----------------------------------------
+
+
+# ┌───────────── minute (0 - 59)
+# │ ┌───────────── hour (0 - 23)
+# │ │ ┌───────────── day of the month (1 - 31)
+# │ │ │ ┌───────────── month (1 - 12)
+# │ │ │ │ ┌───────────── day of the week (0 - 6) (Sunday to Saturday;
+# │ │ │ │ │                                   7 is also Sunday on some systems)
+# │ │ │ │ │
+# │ │ │ │ │
+# * * * * * <command to execute>
+
+
+# MINUTE (0-59), HOUR (0-23), DAY (1-31), MONTH (1-12), DAY OF THE WEEK (0-6)
+45 23 * * 7
+
+# Monday, Wednesday and Friday:
+0  19  *  *  1,3,5
+
+0 = Sunday
+1 = Monday
+2 = Tuesday
+3 = Wednesday
+4 = Thursday
+5 = Friday
+6 = Saturday
+
+
+MINUTES Minutes in one hour (0-59)
+HOURS Hours in one day (0-23)
+DAYMONTH Day in a month (1-31)
+MONTH Month in a year (1-12)
+DAYWEEK Day of the week (0-7) where 0 and 7 are sunday
+
+
+
+Jenkins also supports predefined aliases to schedule build:
+@hourly, @daily, @weekly, @monthly, @midnight
+
+@hourly --> Build every hour at the beginning of the hour --> 0 * * * *
+@daily, @midnight --> Build every day at midnight --> 0 0 * * *
+@weekly --> Build every week at midnight on Sunday morning --> 0 0 * * 0
+@monthly --> Build every month at midnight of the first day of the month --> 0 0 1 * *
+
+
+
+@yearly (or @annually)	Run once a year at midnight of 1 January	0 0 1 1 *
+@monthly	Run once a month at midnight of the first day of the month	0 0 1 * *
+@weekly	Run once a week at midnight on Sunday morning	0 0 * * 0
+@daily (or @midnight)	Run once a day at midnight	0 0 * * *
+@hourly	Run once an hour at the beginning of the hour	0 * * * *
+@reboot	Run at startup	—
+
+@reboot configures a job to run once when the daemon is started. 
+Since cron is typically never restarted, this typically corresponds to the machine being booted. 
+This behavior is enforced in some variations of cron, such as that provided in Debian,[10] so that simply restarting the daemon does not re-run @reboot jobs.
+
+@reboot can be useful if there is a need to start up a server or daemon under a particular user, and the user does not have access to configure init to start the program.
+
+
+
+
+# build every 5 minutes, this will do the job: 
+*/5 * * * *
+
+# build every day at 8h00, this will do the job: 
+0 8 * * *
+
+# Start build daily at 08:30 in the morning, Monday - Friday: 
+30 08 * * 1-5
+
+# Weekday daily build twice a day, at lunchtime 12:00 and midnight 00:00, Sunday to Thursday: 
+00 0,12 * * 0-4
+
+# Start build daily in the late afternoon between 4:00 p.m. - 4:59 p.m. or 16:00 -16:59 depending on the projects hash: 
+H 16 * * 1-5
+
+# Start build at midnight: @midnight or start build at midnight, every Saturday: 
+59 23 * * 6
+
+# Every first of every month between 2:00 a.m. - 02:30 a.m.: 
+H(0,30) 02 01 * *
+
+# every ten minutes in the first half of every hour (three times, perhaps at :04, :14, :24)
+H(0-29)/10 * * * *
+
+# Once in every two hour slot between 8 AM and 4 PM every weekday (perhaps at 9:38 AM, 11:38 AM, 1:38 PM, 3:38 PM):
+H H(8-15)/2 * * 1-5
+
+# Once a day on the 1st and 15th of every month except December:
+H H 1,15 1-11 *
+
+# once every two hours every weekday (perhaps at 10:38 AM, 12:38 PM, 2:38 PM, 4:38 PM)
+H 9-16/2 * * 1-5
+
+# Build every 20 minutes 5am to 11pm:
+H/20 5-23 * * *
+
+# Build every 20 minutes, work time/days (8am-6pm, MON-FRI) only:
+H/20 8-18 * * 1-5
+
+# Build every hour MON-WED and FRI only:
+H * * * 1-3,5
+
+# Build every hour, weekends in April and December:
+H * * 4,12 *
+
+# Build at 8.30am on July 4:
+30 8 4 7 *
