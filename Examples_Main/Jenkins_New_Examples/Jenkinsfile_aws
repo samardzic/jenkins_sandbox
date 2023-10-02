@@ -1,0 +1,82 @@
+@Library(['Common']) _
+
+STABLE_BRANCH = 'master'
+AWS_MANAGER_IMAGE = 'cloud/continental/tools/aws-manager:1.3.0'
+DEFAULT_SINDRI_CONFIG_BUCKET = 'sindri-config-bucket'
+DEFAULT_DATA_LAYER_NAME = 'data'
+def UUID = UUID.randomUUID()
+
+pipeline {
+
+  agent {
+    label 'default'
+  }
+
+  options {
+    ansiColor('xterm')
+    disableConcurrentBuilds()
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  parameters {
+    choice(name: 'ENVIRONMENT', choices: ['integration', 'validation', 'production'], description: 'Target environment')
+    choice(name: 'SINDRI_NAMESPACE', choices: ["sindri", "sindri-v2-2", "sindri-api", "sindri-api-v2-2", "sindri-vv", "sindri-vv-v2-2", "sindri-pprod", "sindri-prod"], description: 'Sindri Namespace')
+    string(name: 'COGNITO_USERNAME', defaultValue: "admin@continental.com", description: 'Cognito username, Ex: admin@continental.com')
+    booleanParam(name: 'CREATE_ADMIN', defaultValue: false, description: 'Run script that allows to create a new conti-admin user')
+
+  }
+
+  environment {
+    AWS_DEFAULT_REGION = 'eu-central-1'
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+    // AWS Account ID (function from Common shared lib)
+    AWS_ACCOUNT_ID = getAwsAccountID(params.ENVIRONMENT, AWS_DEFAULT_REGION)
+
+  }
+
+  stages {
+
+    stage('Create Cognito admin') {
+
+      when { environment name:'CREATE_ADMIN', value:'true';}
+      
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_MANAGER_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+          sh """
+            aws s3 cp s3://${DEFAULT_SINDRI_CONFIG_BUCKET}/config-${params.ENVIRONMENT}-${DEFAULT_DATA_LAYER_NAME}-${params.SINDRI_NAMESPACE}.json data-config.json
+            """
+          script {
+             def outputs = readJSON file: "data-config.json", returnPojo: true
+             env.USER_NAME= UUID.toString() 
+             env.USER_POOL_ID = outputs.user_pool_id.value
+             env.PASSWORD='Sindri007!'
+            }
+            sh """  
+            sh ./assume-role.sh  ${env.AWS_ACCOUNT_ID} ${params.ENVIRONMENT}
+            sh ./cognito-create-user/runbook.sh -i ${USER_POOL_ID} -m ${COGNITO_USERNAME} -g conti-admin -u ${USER_NAME} -p ${PASSWORD} -r ${AWS_DEFAULT_REGION}
+          """
+        }
+      }
+    }
+  }
+
+   post {
+    failure {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME.startsWith('PR') || env.TAG_NAME != null) {
+          slackSend color: 'danger', channel: '#sindri-cicd', message: ":jenkins-devil: Jenkins ${env.JOB_NAME} Job : Failed for ${params.target}. (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+    }
+  }
+}

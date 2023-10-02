@@ -3,7 +3,7 @@ pipeline {
     agent any
     
     environment {
-        // Test Suite default = "webPortal" [webPortal, emailTests, smoke, billing, integrationTests, jnkTest]
+        // Test Suite default = "webPortal" [webPortal, smoke, webShop, billing, integrationTests, jnkTest]
         // TEST_SUITE = '"webPortal or emailTests"'
         TEST_SUITE = "jnkTest"
         

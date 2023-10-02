@@ -1,0 +1,110 @@
+@Library(['Common']) _
+
+DEFAULT_SINDRI_NAMESPACE = 'sindri-v2-2'
+DEFAULT_SINDRI_WORKSPACE = 'v2-2'
+
+
+pipeline {
+  agent { label 'default' }
+
+  options {
+    ansiColor('xterm')
+    timeout(time: 60, unit: 'MINUTES')
+  }
+
+ parameters {
+    choice(name: 'ENVIRONMENT', choices: ['Integration Dev-2.2A', 'CICD CICD-2.2A'], description: 'Target environment')
+  }
+
+  environment {
+    COMMIT_HASH = sh (
+      script: 'git rev-parse --short HEAD',
+      returnStdout: true
+    ).trim()
+   // VERSION = sh (
+   //   script: 'cat VERSION',
+   //   returnStdout: true
+   // ).trim()
+    IMAGE_NAME = 'sindri-api-test-automation'
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+    PROJECT_NAME = 'sindri'
+    IMAGE_TAG = "${COMMIT_HASH}"
+    IMAGE = "${REPO_CD_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+    ROOT = "${PWD}/overlays/${ENVIRONMENT}"
+    DEPLOY_TOOLS_IMAGE = 'harbor.registry.prod.cdsf.io/sindri/cloud/continental/sindri/sindri-kubectl:latest'
+    K8S_TOOLSET_IMAGE = 'cloud/continental/builds/k8s-toolset:1.17'
+    REPO_CD_PUSH_CREDENTIALS_ID = 'harbor-robot-sindri'
+    DEFAULT_SINDRI_CONFIG_BUCKET = 'sindri-config-bucket'
+    AWS_REGION = 'eu-central-1'
+
+    STABLE_BRANCH = 'main'
+
+
+
+    ROLE = 'Integration'
+    LOWER_ROLE = 'integration'
+    ACCOUNT_ID = '082461646758'
+  }
+
+  triggers {
+   // Tests run every day at 04h
+   cron('H 04 * * *')
+  }
+
+  stages {
+
+	stage('Build info') {
+    steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CI_PULL_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker version"
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CI_PULL}\""
+        }
+      }
+    }
+	
+	stage('Change environment') {
+	environment {
+		INT_CLIENT_ID = credentials('sindri-api-integration-client-id')
+		INT_CLIENT_SECRET = credentials('sindri-api-integration-client-secret')
+		CICD_CLIENT_ID = credentials('sindri-api-cicd-client-id')
+		CICD_CLIENT_SECRET = credentials('sindri-api-cicd-client-secret')
+    USER_NAME_ADMIN = credentials('sindri-calogin-username')
+    USER_NAME_CLM = credentials('sindri-clm-user')
+    PASSWORD = credentials('sindri-clm-password')
+	}
+    steps {
+       sshagent (credentials: ['gitlab-jenkins-ssh']) {
+         sh """
+            bash -x change_url.sh "${params.ENVIRONMENT}" $INT_CLIENT_ID $INT_CLIENT_SECRET $CICD_CLIENT_ID $CICD_CLIENT_SECRET $USER_NAME_ADMIN $USER_NAME_CLM $PASSWORD
+            cat src/test/java/baseUtilities/Constants.java
+         """
+         }
+		}
+	}
+
+    stage('Test run up') {
+    steps {
+         sshagent (credentials: ['gitlab-jenkins-ssh']) {
+                   // sh "make IMAGE_NAME=${IMAGE_NAME} IMAGE_TAG=${IMAGE_TAG} build "
+                   sh """
+                     docker rm -f --force sindri-api-test
+                     make build.docker.local.maven
+                     docker run --entrypoint "/bin/bash" --name sindri-api-test -itd -v ${PWD}:/app sindri-mvn-test
+                     docker cp ${WORKSPACE}/. sindri-api-test:/app
+                     docker exec -w /app sindri-api-test mvn clean test
+                     docker cp sindri-api-test:/app/target ${WORKSPACE}/ 
+                   """
+           }
+      }
+    }
+	
+  stage ('Cucumber Reports') {	
+      steps {	
+        cucumber reportTitle: 'Cucumber Test Report',
+              fileIncludePattern: 'target/**/*.json'
+           
+      }
+  }
+
+  }
+}

@@ -1,0 +1,165 @@
+@Library(['Common', 'my-sindri-library']) _
+
+UNIQUE_VERSION = UUID.randomUUID().toString()
+STABLE_BRANCH = 'main'
+K8S_AWS_IMAGE = 'cloud/continental/builds/k8s-aws'
+
+pipeline {
+  agent {
+    label 'default'
+  }
+
+  options {
+    ansiColor('xterm')
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  environment {
+    // Jenkins parameters file
+    PARAMETERS_FILE = 'environments.json'
+    // Jenkins secret to get deployment role
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+
+    AWS_REGION="eu-central-1"
+
+    IMAGE_NAME = sh (
+      script: 'make image.name',
+      returnStdout: true
+    ).trim()
+  }
+
+  stages {
+
+    stage('Build info') {
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CI_PULL_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CI_PULL}\""
+          sh "REPO_CI_PULL=${REPO_CI_PULL}"
+        }
+      }
+    }
+
+    
+    stage('Check the Git commit convention') {
+       when {
+          expression { env.BRANCH_NAME.startsWith('MR') }
+      }
+      steps {
+        script {
+          def configurationJob=build job: "../sindri%2Fsindri.configuration/main",propagate:false, wait: true, parameters: [
+            string(name: 'ACTION', value: 'check-git-commit-convention'),
+            string(name: 'ACTION_INPUT_VALUE', value: env.CHANGE_TITLE),
+          ]
+          if  ( configurationJob.result != 'SUCCESS' ) {
+            currentBuild.result = 'FAILURE'
+            error(configurationJob.getBuildVariables().get("BUILD_FAILED_MESSAGE"))
+          }
+        }
+      }
+    }
+
+    stage('Get K8S kubeconfig') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          args "--entrypoint=''"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+            sh script:"aws s3 cp s3://${KUBECONFIG_S3_BUCKET}/validation/${AWS_REGION}/projects/kubeconfig-sindri-jenkins kubeconfig-validation.conf", label : "Get K8S Config for VAL"
+            sh script:"aws s3 cp s3://${KUBECONFIG_S3_BUCKET}/production/${AWS_REGION}/projects/kubeconfig-sindri-jenkins kubeconfig-production.conf", label : "Get K8S Config for PROD"
+        }
+      }
+    }
+    stage('Get Configuration files') {
+      steps {
+        dir('configuration') {
+          git branch : "main",
+          credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+          url: "git@code.tooling.prod.cdsf.io:sindri/sindri.configuration.git"
+          script {
+            stash includes: 'environments.json', name: 'ENV_CONF'
+          }
+        }
+      }
+    }
+
+    stage('Build env configs') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment { 
+        KUBECONFIG = "${WORKSPACE}/kubeconfig-validation.conf:${WORKSPACE}/kubeconfig-production.conf"
+      }
+      steps {
+        dir('scripts') {
+            unstash 'ENV_CONF'
+            script {
+                def envConfigs = readJSON file: "environments.json", returnPojo: true
+                envConfigs.each{ entry ->
+                    def envFileName=entry.key
+                    def envConfig=entry.value
+                    sh "ls"
+                    sh "sh config.sh $envFileName $envConfig.environment $envConfig.namespace"
+                }
+            }
+        }
+      }
+    }
+    
+
+
+    stage('Build') {
+      steps {
+        sh "make docker.build DEPLOY_TAG=${IMAGE_NAME}:${UNIQUE_VERSION} ."
+        // Create an image from build to get copy of binary
+        sh "docker run --name ${IMAGE_NAME}-${UNIQUE_VERSION} ${IMAGE_NAME}:${UNIQUE_VERSION} make package.all"
+        sh "docker cp ${IMAGE_NAME}-${UNIQUE_VERSION}:/app/pkg/. ./pkg"
+        archiveArtifacts artifacts: 'pkg/*'
+      }
+    }
+
+    stage('Tag version in git repo') {
+      when {
+        allOf {
+          branch "${STABLE_BRANCH}"
+          changeset "VERSION"
+        }
+      }
+      steps {
+        sshagent (credentials: [GIT_SSH_CREDENTIALS_ID]) {
+          sh 'git tag v${CODE_VERSION}'
+          sh 'git push origin v${CODE_VERSION}'
+        }
+      }
+    }
+  }
+
+  post {
+    failure {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME.startsWith('MR') || env.IMAGE_TAG != null) {
+          slackSend color: 'danger', channel: '#sindri-cicd', message: ":jenkins-devil: Jenkins ${env.JOB_NAME} Job : Failed ! (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+    }
+
+    always {
+      script {
+        sh "docker rmi -f \$(docker images -q ${IMAGE_NAME}:${UNIQUE_VERSION}) || exit 0"
+        cleanWs()
+      }
+    }
+  }
+}

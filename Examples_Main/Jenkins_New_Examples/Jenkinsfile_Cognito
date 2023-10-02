@@ -1,0 +1,152 @@
+@Library(['Common']) _
+
+STABLE_BRANCH = 'master'
+AWS_MANAGER_IMAGE = 'cloud/continental/tools/aws-manager:1.3.0'
+DEFAULT_WORKSPACE = 'dev'
+DEFAULT_NAMESPACE = 'sindri'
+DEFAULT_SINDRI_CONFIG_BUCKET = 'sindri-config-bucket'
+DEFAULT_DATA_LAYER_NAME = 'data'
+def UUID = UUID.randomUUID()
+
+pipeline {
+  agent {
+    label 'default'
+  }
+
+  options {
+    ansiColor('xterm')
+    disableConcurrentBuilds()
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  parameters {
+    choice(name: 'ENVIRONMENT', choices: ['integration', 'validation', 'production'], description: 'Target environment')
+    string(name: 'WORKSPACE', defaultValue: "${DEFAULT_WORKSPACE}", description: 'Target workspace')
+    string(name: 'SINDRI_NAMESPACE', defaultValue: "${DEFAULT_NAMESPACE}", description: 'Target workspace')
+    string(name: 'DATA_LAYER_NAME', defaultValue: "${DEFAULT_DATA_LAYER_NAME}", description: 'Data layer name')
+    string(name: 'SINDRI_CONFIG_BUCKET', defaultValue: "${DEFAULT_SINDRI_CONFIG_BUCKET}", description: 'Config S3 bucket name')
+    booleanParam(name: 'COGNITO_SUPER_USER', defaultValue: false, description: 'Run script that allows to add users in the group workshop-superuser-group')
+    booleanParam(name: 'CREATE_USER', defaultValue: false, description: 'Run script that allows to create user and affect it to a group')
+    string(name: 'COGNITO_USERNAME', defaultValue: "admin@continental.com", description: 'Cognito username to be created')
+    choice(name: 'COGNITO_GROUP', choices: ['conti-admin', 'conti-super-admin', 'customer-licence-manager', 'maintenance-team' , 'workshop-superuser-group',' workshop-user-group'] , description: 'The group of the created user')
+    booleanParam(name: 'COGNITO_INITIATE', defaultValue: false, description: 'Run script that allows to initiate cognito with admin and CLM users')
+
+  }
+
+  environment {
+    AWS_DEFAULT_REGION = 'eu-central-1'
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+    // AWS Account ID (function from Common shared lib)
+    AWS_ACCOUNT_ID = getAwsAccountID(params.ENVIRONMENT, AWS_DEFAULT_REGION)
+
+  }
+
+  stages {
+    stage('Create Cognito super user') {
+
+      when { environment name:'COGNITO_SUPER_USER', value:'true';}
+      
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_MANAGER_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+          sh """
+            aws s3 cp s3://${params.SINDRI_CONFIG_BUCKET}/config-${params.ENVIRONMENT}-${params.DATA_LAYER_NAME}-${params.SINDRI_NAMESPACE}.json data-config.json
+            """
+          script {
+             def outputs = readJSON file: "data-config.json", returnPojo: true
+             env.USER_POOL_ID = outputs.user_pool_id.value
+            }
+            sh """  
+            sh ./assume-role.sh  ${env.AWS_ACCOUNT_ID} ${params.ENVIRONMENT}
+            sh ./cognito-superuser/runbooks.sh -p ${env.USER_POOL_ID} -f ./cognito-superuser/resources/${params.ENVIRONMENT}-${params.WORKSPACE}.txt
+          """
+        }
+      }
+    }
+
+    stage('Create Cognito user') {
+
+      when { environment name:'CREATE_USER', value:'true';}
+      
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_MANAGER_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+          sh """
+            aws s3 cp s3://${params.SINDRI_CONFIG_BUCKET}/config-${params.ENVIRONMENT}-${params.DATA_LAYER_NAME}-${params.SINDRI_NAMESPACE}.json data-config.json
+            """
+          script {
+             def outputs = readJSON file: "data-config.json", returnPojo: true
+             env.USER_NAME= UUID.toString() 
+             env.USER_POOL_ID = outputs.user_pool_id.value
+             env.PASSWORD= input message: 'enter password', parameters: [password(defaultValue: 'Sindri007!', description: '', name: 'hidden')]
+            }
+            sh """  
+            sh ./assume-role.sh  ${env.AWS_ACCOUNT_ID} ${params.ENVIRONMENT}
+            sh ./cognito-create-user/runbook.sh -i ${USER_POOL_ID} -m ${COGNITO_USERNAME} -g ${COGNITO_GROUP} -u ${USER_NAME} -p ${PASSWORD} -r ${AWS_DEFAULT_REGION}
+          """
+        }
+      }
+    }
+
+
+    stage('Initiate Cognito') {
+
+      when { environment name:'COGNITO_INITIATE', value:'true';}
+      
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_MANAGER_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+          sh """
+            aws s3 cp s3://${params.SINDRI_CONFIG_BUCKET}/config-${params.ENVIRONMENT}-${params.DATA_LAYER_NAME}-${params.SINDRI_NAMESPACE}.json data-config.json
+            """
+          script {
+             def outputs = readJSON file: "data-config.json", returnPojo: true
+             env.USER_POOL_ID = outputs.user_pool_id.value
+            }
+            sh """  
+            sh ./assume-role.sh  ${env.AWS_ACCOUNT_ID} ${params.ENVIRONMENT}
+            sh ./initiate-cognito/runbook.sh -i ${USER_POOL_ID}  -r ${AWS_DEFAULT_REGION}
+          """
+        }
+      }
+    }
+  
+  }
+  
+   post {
+    failure {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME.startsWith('PR') || env.TAG_NAME != null) {
+          slackSend color: 'danger', channel: '#sindri-cicd', message: ":jenkins-devil: Jenkins ${env.JOB_NAME} Job : Failed for ${params.target}. (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+    }
+  }
+}

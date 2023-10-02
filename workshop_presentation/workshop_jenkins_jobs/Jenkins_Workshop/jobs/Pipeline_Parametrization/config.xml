@@ -1,7 +1,146 @@
 <?xml version='1.1' encoding='UTF-8'?>
-<flow-definition plugin="workflow-job@1174.vdcb_d054cf74a_">
+<flow-definition plugin="workflow-job@1316.vd2290d3341a_f">
+  <actions>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobAction plugin="pipeline-model-definition@2.2141.v5402e818a_779"/>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction plugin="pipeline-model-definition@2.2141.v5402e818a_779">
+      <jobProperties/>
+      <triggers/>
+      <parameters>
+        <string>TEST_BROWSER</string>
+        <string>GIT_BRANCH</string>
+        <string>PUBLISH_API_LOGS</string>
+        <string>SEND_EXECUTION_RESULTS</string>
+      </parameters>
+      <options/>
+    </org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction>
+  </actions>
+  <description></description>
   <keepDependencies>false</keepDependencies>
-  <properties/>
+  <properties>
+    <jenkins.model.BuildDiscarderProperty>
+      <strategy class="hudson.tasks.LogRotator">
+        <daysToKeep>-1</daysToKeep>
+        <numToKeep>4</numToKeep>
+        <artifactDaysToKeep>-1</artifactDaysToKeep>
+        <artifactNumToKeep>-1</artifactNumToKeep>
+      </strategy>
+    </jenkins.model.BuildDiscarderProperty>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>GIT_BRANCH</name>
+          <description>Available TEST SUITES for test execution</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>main</string>
+              <string>development</string>
+              <string>active_dev</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>TEST_BROWSER</name>
+          <description>Available USERS for test execution</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>chrome</string>
+              <string>firefox</string>
+              <string>safari</string>
+              <string>ie</string>
+              <string>edge</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>SEND_EXECUTION_RESULTS</name>
+          <description>Sending email containing test execution report.</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>PUBLISH_API_LOGS</name>
+          <description>Publish API logs generated during execution.</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@3697.vb_470e454c232">
+    <script>pipeline {
+    
+    agent{ 
+        label &apos;nhl2283w_laptop&apos;
+    }
+    
+    environment {
+        // TEST_BROWSER default=&quot;chrome&quot; [chrome, firefox, safari, ie, edge]
+        TEST_BROWSER = &quot;chrome&quot;
+    }
+    
+    
+    parameters {
+        
+        // string(name: &quot;TEST_SUITE&quot;, defaultValue: &quot;jnkTest&quot;, description: &quot;This is for TEST_STRING&quot;) 
+        // text(name: &quot;TEST_TEXT&quot;, defaultValue: &quot;One\nTwo\nThree\n&quot;, description: &quot;This is for TEST_TEXT&quot;)
+        // booleanParam(name: &quot;TEST_BOOLEAN&quot;, defaultValue: true, description: &quot;This is for TEST_BOOLEAN&quot;)
+        // choice(name: &quot;TEST_CHOICE&quot;, choices: [&quot;one&quot;, &quot;two&quot;, &quot;three&quot;], description: &quot;This is TEST_CHOICE&quot;)
+        // password(name: &quot;TEST_PASSWORD&quot;, defaultValue: &quot;SECRET&quot;, description: &quot;This is TEST_PASSWORD&quot;)
+        
+        choice(
+            name: &quot;GIT_BRANCH&quot;, choices: [&apos;main&apos;, &apos;development&apos;, &apos;active_dev&apos;],
+            description: &apos;Available TEST SUITES for test execution&apos;)
+        choice(
+            name: &quot;TEST_BROWSER&quot;, choices: [&apos;chrome&apos;, &apos;firefox&apos;, &apos;safari&apos;, &apos;ie&apos;, &apos;edge&apos;],
+            description: &apos;Available USERS for test execution&apos;)
+        booleanParam(
+            name: &quot;SEND_EXECUTION_RESULTS&quot;, 
+            defaultValue: false, 
+            description: &quot;Sending email containing test execution report.&quot;)
+        booleanParam(
+            name: &quot;PUBLISH_API_LOGS&quot;, 
+            defaultValue: false, 
+            description: &quot;Publish API logs generated during execution.&quot;)
+    }
+
+
+    stages{
+        
+        stage(&apos;Checkout to specific branch&apos;) {
+            steps {
+                echo &apos;${params.GIT_BRANCH}&apos;
+            }   
+        }
+        
+        
+        stage(&apos;Send execution results&apos;) {
+            when {
+                expression{params.SEND_EXECUTION_RESULTS == true}
+            }
+            
+            steps {
+                script {
+                    echo &apos;Test execution results sent.&apos;
+                }
+            }
+        }
+        
+        
+        stage(&apos;Publish api logs&apos;) {
+            when {
+                expression{params.PUBLISH_API_LOGS == true}
+            }
+            
+            steps {
+                echo &apos;API logs Publish SUCCESS&apos;
+            }
+        }
+        
+        
+    }
+    
+    
+}</script>
+    <sandbox>true</sandbox>
+  </definition>
   <triggers/>
   <disabled>false</disabled>
 </flow-definition>

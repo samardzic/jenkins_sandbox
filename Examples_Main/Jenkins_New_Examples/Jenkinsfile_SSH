@@ -1,0 +1,193 @@
+@Library(['Common']) _
+
+IMAGE_NAME = 'lambda-report-indexer-builder'
+UNIQUE_VERSION = UUID.randomUUID().toString()
+STABLE_BRANCH = 'develop'
+SINDRI_WORKSPACE = 'v2-2'
+ENVIRONMENT = 'integration'
+AWS_REGION = 'eu-central-1'
+
+pipeline {
+  agent {
+    label 'default'
+  }
+
+  options {
+    ansiColor('xterm')
+    disableConcurrentBuilds()
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  environment {
+    // get lambda version from file
+    LAMBDA_VERSION = sh (
+              script: 'cat ./VERSION',
+              returnStdout: true
+    ).trim()
+    REPO_CI_PULL = 'docker.repo.tooling.prod.cdsf.io'
+    GOLANG_IMAGE_VERSION='1.15'
+
+    // Artifactory Creds
+    REPO_CI_PUSH_CREDENTIALS_ID = 'artifactory-jenkins-credentials'
+    // Artifactory Creds
+    REPO_URL = "${REPO_CI_HOSTNAME}/artifactory/generic-local/sindri/lambda"
+    //make sure to link to the right CD repo
+    CD_BUILD_JOB = '../sindri%2Fsindri.lambda.report.indexer.deploy/master'
+    SONAR_PROJECT_NAME = "sindri-lambda-report-indexer"
+  }
+
+  stages {
+    
+    stage('Check the Git commit convention') {
+       when {
+          expression { env.BRANCH_NAME.startsWith('MR') }
+      }
+      steps {
+        script {
+          def configurationJob=build job: "../sindri%2Fsindri.configuration/main",propagate:false, wait: true, parameters: [
+            string(name: 'ACTION', value: 'check-git-commit-convention'),
+            string(name: 'ACTION_INPUT_VALUE', value: env.CHANGE_TITLE),
+          ]
+          if  ( configurationJob.result != 'SUCCESS' ) {
+            currentBuild.result = 'FAILURE'
+            error(configurationJob.getBuildVariables().get("BUILD_FAILED_MESSAGE"))
+          }
+        }
+      }
+    }
+
+   stage('Test') {
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/golang:${GOLANG_IMAGE_VERSION}"
+            args '-u root:sudo'
+            alwaysPull false
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+        }
+      }
+      steps {
+         sshagent (credentials: ['gitlab-jenkins-ssh']) {
+          sh """
+            export GOCACHE=$WORKSPACE
+            export GOROOT=/usr/local/go
+            export PATH=\$PATH:\$GOROOT/bin
+            GOPRIVATE=code.tooling.prod.cdsf.io
+            mkdir -p -m 0600 ~/.ssh && ssh-keyscan code.tooling.prod.cdsf.io >> ~/.ssh/known_hosts
+            git config --global url."git@code.tooling.prod.cdsf.io:".insteadOf "https://code.tooling.prod.cdsf.io/"
+            go test -short -race -cover -coverprofile=coverage.out -v ./service/indexer > tests.txt
+          """
+      }
+     }
+    }
+    
+    stage('Quality') {
+      agent {
+          docker {
+              image "sonarsource/sonar-scanner-cli"
+              registryUrl "https://${REPO_CI_PULL}"
+              registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+              reuseNode true
+          }
+      }
+      steps {
+        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_LOGIN')]) {
+          withSonarQubeEnv('sonarqube') {
+             sh """
+               if [ "null" != "${env.CHANGE_ID}" ]; then
+                sonar-scanner -Dsonar.projectVersion=${LAMBDA_VERSION} -Dsonar.projectName=${SONAR_PROJECT_NAME} -Dsonar.projectKey=${SONAR_PROJECT_NAME} \
+                  -Dsonar.pullrequest.branch=${env.CHANGE_BRANCH} \
+                  -Dsonar.pullrequest.key=${env.CHANGE_ID} \
+                  -Dsonar.pullrequest.base=${env.CHANGE_TARGET}
+              else
+                sonar-scanner -Dsonar.projectVersion=${LAMBDA_VERSION} -Dsonar.projectName=${SONAR_PROJECT_NAME} -Dsonar.projectKey=${SONAR_PROJECT_NAME} \
+                  -Dsonar.branch.name=${env.BRANCH_NAME}
+              fi
+            """
+          }
+        }
+      }
+    }
+
+    stage("Quality Gate") {
+        steps {
+            // Workaround for webhooks sent before the status of job set to SUCCES issue, as well as the PR decoration time request. 10 seconds of sleep should be enough.
+            sleep(10)
+            timeout(time: 5, unit: 'MINUTES') {
+                // Parameter indicates whether to set pipeline to UNSTABLE if Quality Gate fails
+                // true = set pipeline to UNSTABLE, false = don't
+                waitForQualityGate abortPipeline: true
+            }
+        }
+    }   
+
+    stage('Build package') {
+      steps {
+          sh """
+          docker rm -f  ${IMAGE_NAME} || true
+          docker build -t ${IMAGE_NAME}:${UNIQUE_VERSION} .
+          docker run --name builder-${UNIQUE_VERSION} ${IMAGE_NAME}:${UNIQUE_VERSION}
+          docker cp builder-${UNIQUE_VERSION}:/build/lambda-report-indexer.zip lambda-report-indexer.${LAMBDA_VERSION}.zip
+          ls -al 
+          """
+      }
+    }
+    
+    // Push lambda zip to artifactory
+    stage('Push local lambda zip to artifactory') {
+      when {anyOf {
+          branch "${STABLE_BRANCH}"
+          }
+        }
+
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CI_PUSH_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+        sh "curl -L -u ${USERNAME}:${PASSWORD} -X PUT  ${REPO_URL}/lambda-report-indexer/lambda-report-indexer.${LAMBDA_VERSION}.zip  -T lambda-report-indexer.${LAMBDA_VERSION}.zip"   
+      }   
+     }
+    }
+
+    stage('Trigger deployment - BRANCH') {
+      when { anyOf { 
+         branch "${STABLE_BRANCH}"
+         } 
+        }
+
+      steps {
+        build job: "${CD_BUILD_JOB}", wait: false, parameters: [
+          string(name: 'LAMBDA_VERSION', value: LAMBDA_VERSION),
+          string(name: 'ENVIRONMENT', value: ENVIRONMENT),
+          string(name: 'SINDRI_WORKSPACE', value: SINDRI_WORKSPACE),
+          string(name: 'AWS_REGION', value: AWS_REGION)
+        ]
+      }
+    }
+  }
+
+  post {
+    success {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME.startsWith('PR')) {
+          slackSend color: 'good', channel: '##sindri-cicd', message: ":New Lamdbda zip available"
+        }
+      }
+    }
+
+    failure {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME.startsWith('PR')) {
+          slackSend color: 'danger', channel: '##sindri-cicd', message: ":jenkins-devil: ${env.JOB_NAME} Job : Failed ! (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+    }
+
+    always {
+      script {
+        sh "docker stop builder-${UNIQUE_VERSION}"
+        sh "docker rm builder-${UNIQUE_VERSION}"
+        sh "docker rmi -f \$(docker images -q ${IMAGE_NAME}:${UNIQUE_VERSION}) || exit 0"
+      }
+      cleanWs()
+    }
+  }
+}

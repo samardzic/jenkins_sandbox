@@ -1,0 +1,229 @@
+// Import SharedLib located at https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/tree/master/vars
+@Library(['Common']) _
+
+STABLE_BRANCH = 'master'
+
+def directorySelection(deployRC){
+  if (deployRC == true) {
+    RELEASE_DIRECTORY = "releases_candidate"
+  } else {
+    RELEASE_DIRECTORY = "releases"
+  }
+}
+
+pipeline {
+ agent {
+   label 'default'
+ }
+
+ options {
+   ansiColor('xterm')
+   timeout(time: 60, unit: 'MINUTES')
+ }
+
+  parameters {
+    choice(name: 'ENVIRONMENT', choices: ['integration', 'validation', 'production'], description: 'Target environment')
+    choice(name: 'SINDRI_NAMESPACE', choices: ["Change me", "sindri", "sindri-v2-2", "sindri-api", "sindri-api-v2-2", "sindri-test", "sindri-vv", "sindri-vv-v2-2", "sindri-pprod", "sindri-prod"], description: 'Sindri Namespace')
+    choice(name: 'SINDRI_WORKSPACE', choices: ["Change me", "dev", "v2-2", "api", "api-v2-2", "test", "vv", "vv-v2-2", "pprod", "prod"], description: 'Sindri Workspace')
+    booleanParam(name: 'DEPLOY_INFRA', defaultValue: false, description: 'Trigger infra deploy flag')
+    string(name: "SINDRI_VERSION", description: "Sindri version", defaultValue: "Change me") //v2.2A.5.yaml
+    booleanParam(name: 'DEPLOY_RC', defaultValue: false, description: 'Deploy release candidate')
+ }
+
+ environment {
+   REGION = "eu-central-1"
+   RELEASE_DIRECTORY = ""
+ }
+ stages {
+   stage('Deploy infra') {
+     when {
+       allOf {
+        branch "${STABLE_BRANCH}"
+        expression { params.DEPLOY_INFRA == true }
+        expression { params.SINDRI_VERSION != "Change me" }
+        expression { params.SINDRI_NAMESPACE != "Change me" }
+        expression { params.SINDRI_WORKSPACE != "Change me" }
+       }
+      }
+     steps {
+      script{
+        directorySelection(params.DEPLOY_RC)
+        def infraInput = readYaml file: "${RELEASE_DIRECTORY}/${SINDRI_VERSION}"
+        env.INFRA_BUILD_JOB = infraInput.services.infra.repository
+        
+        build job: "${INFRA_BUILD_JOB}", wait: true, parameters: [
+            string(name: 'ACTION', value: "apply"),
+            string(name: 'ENVIRONMENT', value: params.ENVIRONMENT),
+            string(name: 'SINDRI_NAMESPACE', value: params.SINDRI_NAMESPACE),
+            string(name: 'SINDRI_WORKSPACE', value: params.SINDRI_WORKSPACE),
+            booleanParam(name: 'COMMON_LAYER', value: true),
+            booleanParam(name: 'DATA_LAYER', value: true),
+            booleanParam(name: 'MAIN_LAYER', value: true)
+          ]
+      }
+     }
+   }
+
+   stage('Deploy services') {
+    when {
+      allOf {
+        branch "${STABLE_BRANCH}"
+        expression { params.SINDRI_VERSION != "Change me" }
+        expression { params.SINDRI_NAMESPACE != "Change me" }
+        expression { params.SINDRI_WORKSPACE != "Change me" }
+      }
+    }
+    steps {
+      script {
+        directorySelection(params.DEPLOY_RC)
+        def releaseData = readYaml file: "${RELEASE_DIRECTORY}/${SINDRI_VERSION}"
+        def commonParams = [
+          string(name: 'ENVIRONMENT', value: params.ENVIRONMENT),
+          string(name: 'AWS_REGION', value: env.REGION),
+          string(name: 'SINDRI_NAMESPACE', value: params.SINDRI_NAMESPACE),
+          string(name: 'SINDRI_WORKSPACE', value: params.SINDRI_WORKSPACE)
+        ]
+      
+        // User-handler
+        def serviceData = releaseData.services.userHandler
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // Licence-handler
+        serviceData = releaseData.services.licenceHandler
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // email-cognito-service
+        serviceData = releaseData.services.cognitoEmailService
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'LAMBDA_VERSION', value: serviceData.lambdaVersion),
+        ] + commonParams
+        }
+
+        // Licence-handler-beta
+        serviceData = releaseData.services.licenceHandlerBeta
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // Customer-api
+        serviceData = releaseData.services.customerApi
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // Authorizer
+        serviceData = releaseData.services.authorizer
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // CoverageDB Manager
+        serviceData = releaseData.services.coverageDbManager
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // // CoverageDB Validator
+        serviceData = releaseData.services.coverageDbValidator
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // Database Migration
+        serviceData = releaseData.services.databaseMigration
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag),
+          string(name: 'MIGRATION_VERSION', value: serviceData.migrationVersion),
+          string(name: 'ACTION', value: serviceData.action)
+        ] + commonParams
+        }
+
+        // Lambda authorizer
+        serviceData = releaseData.services.lambdaAuthorizer
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'LAMBDA_VERSION', value: serviceData.lambdaVersion),
+        ] + commonParams
+        }
+
+        // Lambda legal document
+        serviceData = releaseData.services.lambdaLegalDocument
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'LAMBDA_VERSION', value: serviceData.lambdaVersion),
+        ] + commonParams
+        }
+
+        // Lambda report indexer
+        serviceData = releaseData.services.lambdaReportIndexer
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'LAMBDA_VERSION', value: serviceData.lambdaVersion),
+        ] + commonParams
+        }
+
+        // Lambda S3 Report clean up
+        serviceData = releaseData.services.lambdaS3ReportCleanUp
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'LAMBDA_VERSION', value: serviceData.lambdaVersion),
+        ] + commonParams
+        }
+
+        // Licence job
+        serviceData = releaseData.services.licenceJob
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+    
+        // Webportal
+        serviceData = releaseData.services.webportal
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'COMMIT_HASH', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+        // Argo Apps
+        serviceData = releaseData.services.argoApps
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'ACTION', value: "apply")
+        ] + commonParams
+        }
+
+        // email-notifier-job
+        serviceData = releaseData.services.emailNotifierJob
+        if (serviceData != null){
+        build job: serviceData.repository, wait: true, parameters: [
+          string(name: 'IMAGE_TAG', value: serviceData.imageTag)
+        ] + commonParams
+        }
+
+       }
+     }
+   }
+ }
+}

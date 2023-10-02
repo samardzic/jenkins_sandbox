@@ -1,0 +1,203 @@
+@Library(['Common']) _
+
+UNIQUE_VERSION = UUID.randomUUID().toString()
+STABLE_BRANCH = 'develop'
+IMAGE_NAME = 'database-migrate'
+
+pipeline {
+  agent {
+    label 'default'
+  }
+
+  parameters {
+    choice(name: 'DB_ACTION', choices: ['migrate', 'populate', 'all'], description: 'Perform the images DB build')
+  }
+
+  options {
+    ansiColor('xterm')
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  environment {
+    // Image that should be use for local dev e.g microservices
+    DEV_IMAGE_NAME = sh (
+      script: 'make image.local.name',
+      returnStdout: true
+    ).trim()
+    IMAGE_TAG = sh (
+      script: 'make image.tag',
+      returnStdout: true
+    ).trim()
+    CODE_VERSION = sh (
+      script: 'cat VERSION',
+      returnStdout: true
+    ).trim()
+    // Project Name in Harbor and artifactory
+    PROJECT_NAME = 'sindri'
+    // Harbor Creds
+    REPO_CD_PUSH_CREDENTIALS_ID = 'harbor-robot-sindri'
+    // Artifactory Creds
+    REPO_CI_PUSH_CREDENTIALS_ID = 'artifactory-jenkins-credentials'
+    REPO_CI_SINDRI_NAME = "${REPO_CI_PUSH}/cloud/continental/${PROJECT_NAME}"
+  }
+
+  stages {
+    stage('Check the Git commit convention') {
+       when {
+          expression { env.BRANCH_NAME.startsWith('MR') }
+      }
+      steps {
+        script {
+          def configurationJob=build job: "../sindri%2Fsindri.configuration/main",propagate:false, wait: true, parameters: [
+            string(name: 'ACTION', value: 'check-git-commit-convention'),
+            string(name: 'ACTION_INPUT_VALUE', value: env.CHANGE_TITLE),
+          ]
+          if  ( configurationJob.result != 'SUCCESS' ) {
+            currentBuild.result = 'FAILURE'
+            error(configurationJob.getBuildVariables().get("BUILD_FAILED_MESSAGE"))
+          }
+        }
+      }
+    }
+
+    // Build local-postgres image
+    stage('Build local postgres') {
+      when {
+        changeset "migrations/*"
+      }
+      steps {
+        sh "make build.docker.local"
+      }
+    }
+
+    // Push local-postgres image to artifactory
+    stage('Push local postgres to artifactory') {
+      when {
+        allOf {
+          expression { params.DB_ACTION == 'migrate' || params.DB_ACTION == 'all' }
+          changeset "migrations/*"
+          branch "${STABLE_BRANCH}"
+        }
+      }
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CI_PUSH_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker tag ${DEV_IMAGE_NAME}:${IMAGE_TAG} ${REPO_CI_SINDRI_NAME}/${DEV_IMAGE_NAME}:${IMAGE_TAG}"
+          sh "docker tag ${DEV_IMAGE_NAME}:${IMAGE_TAG} ${REPO_CI_SINDRI_NAME}/${DEV_IMAGE_NAME}:latest"
+
+          sh "docker push ${REPO_CI_SINDRI_NAME}/${DEV_IMAGE_NAME}:${IMAGE_TAG}"       
+          sh "docker push ${REPO_CI_SINDRI_NAME}/${DEV_IMAGE_NAME}:latest"
+        }
+      }
+    }
+	
+    stage('Repo CI login info') {
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CI_PUSH_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker version"
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CI_PULL}\""
+        }
+      }
+    }
+    
+    // Build migrate image
+    stage('Build MIGRATE image') {
+      when {
+        allOf {
+          expression { params.DB_ACTION == 'migrate' || params.DB_ACTION == 'all' }
+          changeset "migrations/*"
+        }
+      }
+      steps {
+        sh """
+          docker build -t ${IMAGE_NAME}:${UNIQUE_VERSION} .
+        """
+      }
+    }
+
+    stage('Tag version in git repo') {
+      when {
+        allOf {
+          expression { params.DB_ACTION == 'migrate' || params.DB_ACTION == 'all' }
+          branch "${STABLE_BRANCH}"
+          changeset "VERSION"
+        }
+      }
+      steps {
+        sshagent (credentials: [GIT_SSH_CREDENTIALS_ID]) {
+          sh 'git tag v${CODE_VERSION}'
+          sh 'git push origin v${CODE_VERSION}'
+        }
+      }
+    }
+
+    // Push migrate image to harbor registry
+    stage('Push MIGRATE image to Harbor - BRANCH') {
+      when {
+          expression { params.DB_ACTION == 'migrate' || params.DB_ACTION == 'all' }
+          changeset "migrations/*"
+          branch "${STABLE_BRANCH}"
+      }
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CD_PUSH_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker tag ${IMAGE_NAME}:${UNIQUE_VERSION} ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+          sh "docker tag ${IMAGE_NAME}:${UNIQUE_VERSION} ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${BRANCH_NAME}"
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CD_HOSTNAME}\""
+          sh "docker push ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+          sh "docker push ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${BRANCH_NAME}"
+        }
+      }
+    }
+
+    // Populate DB image
+    stage('Build POPULATE image') {
+      when {
+        allOf {
+          expression { params.DB_ACTION == 'populate' || params.DB_ACTION == 'all' }
+          changeset "populate/**"
+        }
+      }
+      steps {
+        sh "docker build -t database-populate:${UNIQUE_VERSION} -f populate/Dockerfile ."
+      }
+    }
+
+    // Push Populate image to harbor registry
+    stage('Push POPULATE image to Harbor ') {
+      when {
+        allOf {
+          expression { params.DB_ACTION == 'populate' || params.DB_ACTION == 'all' }
+          changeset "populate/**"
+          branch "${STABLE_BRANCH}"
+        }
+      }
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CD_PUSH_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker tag database-populate:${UNIQUE_VERSION} ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/database-populate:${IMAGE_TAG}"
+          sh "docker tag database-populate:${UNIQUE_VERSION} ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/database-populate:${BRANCH_NAME}"
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CD_HOSTNAME}\""
+          sh "docker push ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/database-populate:${IMAGE_TAG}"
+          sh "docker push ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/database-populate:${BRANCH_NAME}"
+        }
+      }
+    }
+
+  }
+
+  post {
+    failure {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME.startsWith('MR') || env.TAG_NAME != null) {
+          slackSend color: 'danger', channel: '#sindri-cicd', message: ":jenkins-devil: Jenkins ${env.JOB_NAME} Job : Failed ! (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+    }
+    always {
+      script {
+        sh "docker rmi -f \$(docker images -q ${IMAGE_NAME}:${UNIQUE_VERSION}) || exit 0"
+        sh "docker rmi -f \$(docker images -q ${DEV_IMAGE_NAME}:${UNIQUE_VERSION}) || exit 0"
+        sh "docker rmi -f \$(docker images -q database-populate:{${UNIQUE_VERSION}) || exit 0"
+        sh "docker rmi -f \$(docker images -q database-users:{${UNIQUE_VERSION}) || exit 0"
+      }
+    }
+  }
+}

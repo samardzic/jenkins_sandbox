@@ -1,0 +1,412 @@
+@Library(['Common']) _
+
+pipeline {
+  agent {
+    label 'default'
+  }
+
+  options {
+    ansiColor('xterm')
+    timeout(time: 60, unit: 'MINUTES')
+  }
+
+
+  environment {
+    ROOT_PATH="${WORKSPACE}"
+    // Version
+    SINDRI_VERSION="v2.2"
+    SINDRI_VERSION_DASH= "v2-2"
+    // Source Integration settings
+    SOURCE_ENVIRONMENT = 'integration'
+    SOURCE_ENVIRONMENT_SHORT = 'integ'
+    SINDRI_INTEGRATION_WORKSPACE = "${SINDRI_VERSION_DASH}"
+    SINDRI_INTEGRATION_NAMESPACE = "sindri-${SINDRI_VERSION_DASH}"
+    // Target CI-CD settings
+    SINDRI_CICD_WORKSPACE = "api-${SINDRI_VERSION_DASH}"
+    SINDRI_CICD_NAMESPACE = "sindri-api-${SINDRI_VERSION_DASH}"
+    SOURCE_ENVIRONMENT_VALIDATION = 'validation'
+    // Release settings    
+    CD_BUILD_JOB_DEPLOY = '../sindri%2Fsindri.releases.deploy/'
+    RELEASE_DEPLOY_BRANCH="master"
+    REPO_RELEASE_DEPLOY_URL="git@code.tooling.prod.cdsf.io:sindri/sindri.releases.deploy.git"
+    REPO_RELEASE_DEPLOY_RELEASES_DIR_NAME="releases"
+    REPO_RELEASE_NOTE_DIR_NAME="releases_note"
+    REPO_RELEASE_DEPLOY_RC_DIR_NAME="releases_candidate"
+    RELEASE_CANDIDATE_FILE_NAME = ''
+    // Validation settings
+    CD_BUILD_JOB_VALIDATION = '../sindri%2Fsindri.validation/'
+    VALIDATION_BRANCH = "sindri.backend.validation-${SINDRI_VERSION}"
+    // Images tool settings
+    AWS_MANAGER_IMAGE = 'cloud/continental/tools/aws-manager:2.2.0'
+    K8S_TOOLSET_IMAGE = 'cloud/continental/builds/k8s-toolset:1.19'
+    PREFIX_IMAGES="harbor.registry.prod.cdsf.io/sindri/"
+    REPO_CD_PUSH_CREDENTIALS_ID = 'harbor-robot-sindri'
+    // AWS settings
+    AWS_DEFAULT_REGION = 'eu-central-1'
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+    AWS_LOWER_ROLE = 'integration'
+    AWS_ACCOUNT_ID = getAwsAccountID(SOURCE_ENVIRONMENT, AWS_DEFAULT_REGION)
+    // SINDRI_RESOURCES_BUCKET = "sindri-${SOURCE_ENVIRONMENT}-${SINDRI_INTEGRATION_WORKSPACE}-resources-bucket"
+    STABLE_BRANCH='v2.2'
+    K8S_AWS_IMAGE = 'cloud/continental/builds/k8s-aws'
+    SRC_ENV = "Integration"
+    ENVIRONMENT = "integration"
+    REGION = "eu-central-1"
+  }
+
+  //triggers {
+     //Tests run every day of week at 3:30 am UTC
+    // cron('30 3 * * 1-5')  
+  //}
+
+  stages {
+    stage('Build info') {
+      steps {
+          sh "echo Repo of tests validation: ${CD_BUILD_JOB_VALIDATION}${VALIDATION_BRANCH}"
+          sh "echo SINDRI_INTEGRATION_WORKSPACE: ${SINDRI_INTEGRATION_WORKSPACE}"
+          sh "echo SINDRI_INTEGRATION_NAMESPACE: ${SINDRI_INTEGRATION_NAMESPACE}"
+          sh "echo SINDRI_CICD_WORKSPACE: ${SINDRI_CICD_WORKSPACE}"
+          sh "echo SINDRI_CICD_NAMESPACE: ${SINDRI_CICD_NAMESPACE}"
+          sh "echo VALIDATION_BRANCH: ${VALIDATION_BRANCH}"
+          sh "echo ENVIRONMENT : ${env.ENVIRONMENT}"
+          sh "echo REGION : ${env.REGION}"
+      }
+    }
+
+    stage('Trigger deployment integration validation') {
+      when { branch "${STABLE_BRANCH}"}
+      steps {
+        script {
+          def validationIntegration=build job: "${CD_BUILD_JOB_VALIDATION}${VALIDATION_BRANCH}", propagate:false, wait: true
+          if ( validationIntegration.result != 'SUCCESS' ) {
+            currentBuild.result = 'FAILURE'
+            slackSend color: 'danger', channel: '#sindri_daily_cicd', message: ":jenkins-devil: Jenkins branch: ${BRANCH_NAME} ** Failed - stage Trigger deployment integration validation ! ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+            sh "exit 1"
+          } else {
+            slackSend color: 'good', channel: '#sindri_daily_cicd', message: ":jenkins-masked: Jenkins branch: ${BRANCH_NAME} ** stage: Validation integration success ! **  (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-masked:"
+          }
+        }
+      }
+    }
+
+    stage('Build Release Candidate file') {
+      when { branch "${STABLE_BRANCH}"}
+      steps {
+        dir('deploy-releases') {
+          git branch : "${RELEASE_DEPLOY_BRANCH}", 
+          credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+          url: "${REPO_RELEASE_DEPLOY_URL}"
+          script {
+            RELEASE_FILES_PATH=sh(returnStdout: true, script:"echo \$(pwd)/${REPO_RELEASE_DEPLOY_RELEASES_DIR_NAME}").trim()
+            echo "RELEASE_FILES_PATH: $RELEASE_FILES_PATH"
+            LATEST_RELEASE_FILE_NAME=sh(returnStdout: true, script:"${ROOT_PATH}/scripts/get_last_release_file.sh ${RELEASE_FILES_PATH}").trim()
+            echo "LATEST_RELEASE_FILE_NAME: $LATEST_RELEASE_FILE_NAME"
+            RELEASE_CANDIDATE_FILE_NAME=sh(returnStdout: true, script: "${ROOT_PATH}/scripts/build_RC_file.sh ${ROOT_PATH} ${LATEST_RELEASE_FILE_NAME} ${SINDRI_VERSION}").trim()
+            echo "RELEASE_CANDIDATE_FILE_NAME: $RELEASE_CANDIDATE_FILE_NAME"
+            sh "cp ${RELEASE_FILES_PATH}/${LATEST_RELEASE_FILE_NAME} ${ROOT_PATH}"
+          }
+        }
+        sh "echo Release candidate deployment file created with success:${RELEASE_CANDIDATE_FILE_NAME}"
+      }
+    }
+
+    stage('Get K8S kubeconfig') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          args "--entrypoint=''"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+        steps {
+          script{
+            env.AWS_CONFIG_FILE="${WORKSPACE}/.aws_config"
+            env.AWS_SHARED_CREDENTIALS_FILE="${WORKSPACE}/.aws_credentials"
+            configureAwsProfiles("sindri", "integration", env.REGION)
+            withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+              sh "aws --profile target s3 cp s3://gtp.kubeconfig.${env.ENVIRONMENT}.${env.REGION}.prod.applicative-k8s/kubeconfig-jenkins-sindri kubeconfig_${SOURCE_ENVIRONMENT_SHORT}.conf"
+          }
+          }
+      }
+    }
+
+    stage('Inject K8S Resources Image Tags') {
+      when { branch "${STABLE_BRANCH}"}
+      environment {
+        KUBECONFIG = "${WORKSPACE}/kubeconfig_${SOURCE_ENVIRONMENT_SHORT}.conf"
+        ENVIRONMENT = "${SOURCE_ENVIRONMENT_SHORT}"
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        script {
+          sh(script: "scripts/inject_images_tag.sh ${ROOT_PATH} ${RELEASE_CANDIDATE_FILE_NAME} ${PREFIX_IMAGES} ${SINDRI_INTEGRATION_NAMESPACE} ${LATEST_RELEASE_FILE_NAME}")
+        }
+      }    
+    }
+
+    stage('Inject AWS Lambda Tags') {
+      when { branch "${STABLE_BRANCH}"}
+      parallel{
+        stage("lambda-legal-documentation-management") {
+          steps {
+              dir('lambda-legal-documentation-management') {
+                git branch : "master",
+                credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+                url: "git@code.tooling.prod.cdsf.io:sindri/sindri.lambda.legal-documentation-management.git"
+              }
+              sh(script: "scripts/inject_lambda_version.sh lambdaLegalDocument ${WORKSPACE} lambda-legal-documentation-management ${RELEASE_CANDIDATE_FILE_NAME}")
+            }
+        }
+        stage("lambda-report-indexer") {
+          steps {
+              dir('lambda-report-indexer') {
+                git branch : "master",
+                credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+                url: "git@code.tooling.prod.cdsf.io:sindri/sindri.lambda.report.indexer.git"
+              }
+              sh(script: "scripts/inject_lambda_version.sh lambdaReportIndexer ${WORKSPACE} lambda-report-indexer ${RELEASE_CANDIDATE_FILE_NAME}")
+
+            }
+        }
+        stage("lambda-report-cleanup") {
+          steps {
+              dir('lambda-report-cleanup') {
+                git branch : "main",
+                credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+                url: "git@code.tooling.prod.cdsf.io:sindri/sindri.lambda.report.cleanup.git"
+              }
+              sh(script: "scripts/inject_lambda_version.sh lambdaS3ReportCleanUp ${WORKSPACE} lambda-report-cleanup ${RELEASE_CANDIDATE_FILE_NAME}")
+
+            }
+        }
+        stage("lambda-email-service") {
+          steps {
+              dir('lambda-email-service') {
+                git branch : "main",
+                credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+                url: "git@code.tooling.prod.cdsf.io:sindri/sindri.lambda.cognito.custom.email.service.git"
+              }
+              sh(script: "scripts/inject_lambda_version.sh cognitoEmailService ${WORKSPACE} lambda-email-service ${RELEASE_CANDIDATE_FILE_NAME}")
+
+            }
+        }
+        stage("lambda-authorizer") {
+          steps {
+              dir('lambda-authorizer') {
+                git branch : "master",
+                credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+                url: "git@code.tooling.prod.cdsf.io:sindri/sindri.apigateway.lambda.authorizer.git"
+              }
+              sh(script: "scripts/inject_lambda_version.sh lambdaAuthorizer ${WORKSPACE} lambda-authorizer ${RELEASE_CANDIDATE_FILE_NAME}")
+            }
+        }
+        stage("lambda-ses-events-monitor") {
+          steps {
+              dir('lambda-ses-events-monitor') {
+                git branch : "main",
+                credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+                url: "git@code.tooling.prod.cdsf.io:sindri/sindri.lambda.monitor.ses.events.git"
+              }
+              sh(script: "scripts/inject_lambda_version.sh sesEventsMonitoring ${WORKSPACE} lambda-ses-events-monitor ${RELEASE_CANDIDATE_FILE_NAME}")
+            }
+        }
+      }
+    }
+
+    stage('Push release candidate file') {
+      when { branch "${STABLE_BRANCH}"}
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+      }
+      steps {
+       sshagent (credentials: ['gitlab-jenkins-ssh']) {
+          withCredentials([
+            file(credentialsId: GIT_GPG_CREDENTIALS_ID, variable: 'GIT_GPG')
+          ]) {
+            sh(script: "${WORKSPACE}/scripts/push_deployment_file.sh ${WORKSPACE} ${RELEASE_CANDIDATE_FILE_NAME} ${REPO_RELEASE_DEPLOY_RC_DIR_NAME} ${RELEASE_DEPLOY_BRANCH}")
+          }
+        }
+      }
+    }
+
+    stage("Trigger CI/CD deployment") {
+      when { branch "${STABLE_BRANCH}"}
+      steps {
+        script {
+          def cicdDeployment=build job: "${CD_BUILD_JOB_DEPLOY}${RELEASE_DEPLOY_BRANCH}",propagate:false, wait: true, parameters: [
+          string(name: 'ENVIRONMENT', value: SOURCE_ENVIRONMENT_VALIDATION),
+          string(name: 'SINDRI_NAMESPACE', value: SINDRI_CICD_NAMESPACE),
+          string(name: 'SINDRI_WORKSPACE', value: SINDRI_CICD_WORKSPACE),
+          booleanParam(name: 'DEPLOY_INFRA', value: true),
+          string(name: 'SINDRI_VERSION', value: RELEASE_CANDIDATE_FILE_NAME),
+          booleanParam(name: 'DEPLOY_RC', value: true),
+        ]
+          if ( cicdDeployment.result != 'SUCCESS' ) {
+            currentBuild.result = 'FAILURE'
+             slackSend color: 'danger', channel: '#sindri_daily_cicd', message: ":jenkins-devil: Jenkins branch: ${BRANCH_NAME} ** Failed - stage Trigger CI/CD deployment ! ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+            sh "exit 1"
+          } else {
+             slackSend color: 'good', channel: '#sindri_daily_cicd', message: ":jenkins-masked: Jenkins branch: ${BRANCH_NAME} ** stage: CI/CD deployment success ! ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-masked:"
+          }
+        }
+      }
+    }
+
+    stage("Validation CI/CD environment") {
+      when { branch "${STABLE_BRANCH}"}
+      steps {
+        script {
+          sh "echo pass"
+          // No test on cicd currently //
+
+        //  if ( validationCICD.result != 'SUCCESS' ) {
+        //     currentBuild.result = 'FAILURE'
+        //      slackSend color: 'danger', channel: '#sindri_daily_cicd', message: ":jenkins-devil: Jenkins branch: ${BRANCH_NAME} ** Failed - stage Validation CI/CD environment ! ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        //     sh "exit 1"
+        //   } else {
+        //      slackSend color: 'good', channel: '#sindri_daily_cicd', message: ":jenkins-masked: Jenkins branch: ${BRANCH_NAME} ** Validation CI/CD success ! ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-masked:"
+        //   }
+        }
+      }
+    }
+
+     stage('Build release note') {
+       when { branch "${STABLE_BRANCH}"}
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_TOOLSET_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+      }
+      steps {
+       sshagent (credentials: ['gitlab-jenkins-ssh']) {
+          withCredentials([
+            file(credentialsId: GIT_GPG_CREDENTIALS_ID, variable: 'GIT_GPG')
+          ]) {
+            script{
+              RELEASE_FILE_NAME=sh(returnStdout: true, script:"echo ${RELEASE_CANDIDATE_FILE_NAME} | sed -r 's/.RC.*(.{5})/\\1/'").trim()
+              sh(script: "${WORKSPACE}/scripts/build_release_note.sh ${RELEASE_FILE_NAME} ${ROOT_PATH}")
+            }
+          }
+        }
+      }
+    }
+
+    stage('Check new commit') {
+      when { branch "${STABLE_BRANCH}"}
+      steps {
+        script{
+        COMMITS=sh(returnStdout: true, script: "cat ${ROOT_PATH}/commits_uniq.txt").trim()
+        }
+      }
+    }
+
+    stage('Push final release file and note') {
+      when { 
+        allOf { 
+          branch "${STABLE_BRANCH}"
+          expression { COMMITS }
+        }
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+      }
+      steps {
+       sshagent (credentials: ['gitlab-jenkins-ssh']) {
+          withCredentials([
+            file(credentialsId: GIT_GPG_CREDENTIALS_ID, variable: 'GIT_GPG')
+          ]) {
+            script{
+              RELEASE_FILE_NAME=sh(returnStdout: true, script:"echo ${RELEASE_CANDIDATE_FILE_NAME} | sed -r 's/.RC.*(.{5})/\\1/'").trim()
+              sh "cp ${WORKSPACE}/${RELEASE_CANDIDATE_FILE_NAME} ${WORKSPACE}/${RELEASE_FILE_NAME}"
+              sh "echo RELEASE_FILE_NAME: $RELEASE_FILE_NAME"
+              sh(script: "${WORKSPACE}/scripts/push_deployment_file.sh ${WORKSPACE} ${RELEASE_FILE_NAME} ${REPO_RELEASE_DEPLOY_RELEASES_DIR_NAME} ${RELEASE_DEPLOY_BRANCH}")
+              RELEASE_NOTE_NAME=sh(returnStdout: true, script: "cat ${ROOT_PATH}/release_note_name.txt").trim()
+              sh(script: "${WORKSPACE}/scripts/push_deployment_file.sh ${WORKSPACE} ${RELEASE_NOTE_NAME} ${REPO_RELEASE_NOTE_DIR_NAME} ${RELEASE_DEPLOY_BRANCH}")
+              slackSend color: 'good', channel: '#sindri_daily_cicd', message: ":jenkins-masked: Jenkins branch: ${BRANCH_NAME} ** New release: ${RELEASE_FILE_NAME} and release note: ${RELEASE_NOTE_NAME} ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-masked:"
+            }
+          }
+        }
+      }
+    }
+
+    stage('Clean releases candidate directory') {
+      when { branch "${STABLE_BRANCH}"}
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_TOOLSET_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+      }
+      steps {
+       sshagent (credentials: ['gitlab-jenkins-ssh']) {
+          withCredentials([
+            file(credentialsId: GIT_GPG_CREDENTIALS_ID, variable: 'GIT_GPG')
+          ]) {
+            script{
+              sh(script: "${WORKSPACE}/scripts/clean_RC_dir.sh ${WORKSPACE} ${REPO_RELEASE_DEPLOY_RC_DIR_NAME} ${RELEASE_DEPLOY_BRANCH}")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    failure {
+      script {
+        slackSend color: 'danger', channel: '#sindri_daily_cicd', message: ":jenkins-devil: Jenkins branch: ${BRANCH_NAME} ** Pipeline failed ! ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+      }
+    }
+    success {
+      script {
+        slackSend color: 'good', channel: '#sindri_daily_cicd', message: ":jenkins-flex: Jenkins branch: ${BRANCH_NAME} ** Pipeline success ! ** (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-flex:"
+      }
+    }
+    always{
+      cleanWs()
+    }
+  }
+}
+

@@ -1,0 +1,707 @@
+// Import 'Common' SharedLib located at https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/tree/master/vars
+// Import 'my-sindri-library' SharedLib located at https://code.tooling.prod.cdsf.io/sindri/sindri.configuration/-/tree/main/vars
+@Library(['Common', 'my-sindri-library']) _
+DEFAULT_SINDRI_NAMESPACE = "sindri"
+K8S_TOOLSET_IMAGE = 'cloud/continental/builds/k8s-toolset:1.19'
+AWS_MANAGER_IMAGE = 'cloud/continental/tools/aws-manager:2.0.0'
+AWS_TERRAFORM_IMAGE = 'cloud/continental/ehorizon/builds/terraform-aws:0.13.5'
+DEFAULT_COMMON_LAYER_NAME = "common"
+DEFAULT_MAIN_LAYER_NAME = "main"
+DEFAULT_SINDRI_WORKSPACE = 'dev'
+DEFAULT_DATA_LAYER_NAME = 'data'
+DEFAULT_SINDRI_CONFIG_BUCKET = 'sindri-config-bucket'
+DEFAULT_REPO_TAG='default-tag'
+// Use custom image with awscli-2
+AWS_IMAGE="aws-manage-location"
+// Workspace : Namespace mapping information:
+  //  "dev":"sindri", 
+  //  "v2-2":"sindri-v2-2",
+  //  "api":"sindri-api",
+  //  "vv":"sindri-vv",
+  //  "pprod":"sindri-pprod",
+  //  "prod":"sindri-prod"
+
+
+pipeline {
+  agent { label 'default' }
+
+  options {
+    timeout(time: 20, unit: 'MINUTES')
+    disableConcurrentBuilds()
+    ansiColor('xterm')
+  }
+
+  environment {
+    // AWS variables
+    AWS_DEFAULT_REGION = 'eu-central-1'
+    AWS_SINDRI_RDS_CREDENTIALS = 'sindri_database_credentials'
+    AWS_SINDRI_RDS_OWNER_CREDENTIALS_ACCESS = credentials('sindri_database_credentials')
+    SINDRI_STATE_BUCKET = "sindri-state-bucket"
+    SINDRI_CONFIG_BUCKET = "sindri-config-bucket"
+    SINDRI_RESOURCES_BUCKET = "sindri-resources"
+   // Project Name in Harbor, IAM and K8S RBAC
+    PROJECT_NAME = 'sindri'
+    // Stable branch name
+    STABLE_BRANCH = 'topmotive_integration'
+    // Jenkins secret to get deployment role
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+    // Config files from shared lib
+    AWS_CONFIG_FILE = "${WORKSPACE}/.aws_config"
+    AWS_SHARED_CREDENTIALS_FILE = "${WORKSPACE}/.aws_credentials"
+    // Jenkins parameters file
+    PARAMETERS_FILE = 'jenkins_parameters.json'
+  }
+
+  stages {
+    stage('Setup parameters and environment') {
+      steps {
+        dir('configuration') {
+          git branch : "main",
+          credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+          url: "git@code.tooling.prod.cdsf.io:sindri/sindri.configuration.git"
+          script {
+            NAMESPACE=buildDynamicParameters("$PARAMETERS_FILE", "namespace")
+            WORKSPACE_SINDRI=buildDynamicParameters("$PARAMETERS_FILE", "workspace")
+            ENV=buildDynamicParameters("$PARAMETERS_FILE", "environment")
+            AWS_REGION=buildDynamicParameters("$PARAMETERS_FILE", "region")
+            properties([
+              parameters([
+                choice(choices: "${NAMESPACE}", name: 'SINDRI_NAMESPACE', description: 'Sindri Namespace'),
+                choice(choices: "${WORKSPACE_SINDRI}", name: 'SINDRI_WORKSPACE', description: 'Terraform workspace'),
+                choice(choices: "${ENV}", name: 'ENVIRONMENT', description: 'Target environment'),
+                choice(choices: "${AWS_REGION}", name: 'REGION', description: 'AWS region to which to deploy'),
+                choice(name: 'ACTION', choices: ['check','apply', 'destroy'], description: 'Terraform Action'),
+                booleanParam(name: 'COMMON_LAYER', defaultValue: false, description: 'Create common layer'),
+                booleanParam(name: 'DATA_LAYER', defaultValue: false, description: 'Create data layer'),
+                booleanParam(name: 'MAIN_LAYER', defaultValue: false, description: 'Create main layer'),
+                booleanParam(name: 'CREATE_USERS', defaultValue: false, description: 'Populate Cognito User Pool with users described in /scripts/add-users.json'),
+                booleanParam(name: 'DELETE_USERS', defaultValue: false, description: 'Delete Cognito Users whose sub is in /scripts/delete-users.json')
+              ])
+            ])
+            ACTION = "${params.ACTION != "" ? params.ACTION : "check"}"
+            SINDRI_WORKSPACE = "${params.SINDRI_WORKSPACE != "" ? params.SINDRI_WORKSPACE : "dev"}"
+
+            env.AWS_RDS_USER_CREDS = getSindriDBCreds()
+            // AWS Account ID (function from Common shared lib)
+            env.AWS_ACCOUNT_ID = getAwsAccountID(params.ENVIRONMENT, params.REGION)
+            // Not created by Terraform AWS resources information
+            env.AWS_LOCATION_PLACE_INDEX_NAME = "sindri-${params.ENVIRONMENT}-${SINDRI_WORKSPACE}-location-place-index"
+          }
+        }
+      }
+    }
+  
+    stage('Build info') {
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CI_PULL_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker version"
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CI_PULL}\""
+          sh "echo AWS_RDS_USER_CREDS=${AWS_RDS_USER_CREDS}"
+          sh "echo SINDRI_WORKSPACE=${SINDRI_WORKSPACE}"
+          sh "echo AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}"
+          sh "echo ACTION=${ACTION}"
+          sh "echo AWS_LOCATION_PLACE_INDEX_NAME=${AWS_LOCATION_PLACE_INDEX_NAME}"
+        }
+      }
+    }
+
+    stage('Check the Git commit convention') {
+       when {
+          expression { env.BRANCH_NAME.startsWith('MR') }
+      }
+      steps {
+        script {
+          def configurationJob=build job: "../sindri%2Fsindri.configuration/main",propagate:false, wait: true, parameters: [
+            string(name: 'ACTION', value: 'check-git-commit-convention'),
+            string(name: 'ACTION_INPUT_VALUE', value: env.CHANGE_TITLE),
+          ]
+          if  ( configurationJob.result != 'SUCCESS' ) {
+            currentBuild.result = 'FAILURE'
+            error(configurationJob.getBuildVariables().get("BUILD_FAILED_MESSAGE"))
+          }
+        }
+      }
+    }
+
+    stage('Configure AWS profiles') {
+      steps {
+        // You can customize the name displayed in the Jenkins UI to indentify the environment and region targeted by each jenkins job
+        script {
+          currentBuild.displayName = "${BUILD_DISPLAY_NAME}.${ACTION}.${params.ENVIRONMENT}.${AWS_DEFAULT_REGION}"
+        }
+        configureAwsProfiles(env.PROJECT_NAME, params.ENVIRONMENT, AWS_DEFAULT_REGION)
+      }
+    }
+    stage('Build aws image docker') {
+      steps {
+        script {
+          sh (script: "docker build -f Dockerfile_aws --no-cache -t ${AWS_IMAGE} .")
+        }
+      }
+    }
+    stage('Create terraform S3 buckets') {
+      when {
+         expression { params.IMAGE_TAG != "Change me" }
+      }
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_MANAGER_IMAGE}"
+            alwaysPull false
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        sh """
+          AWS_PROFILE=backend /scripts/create_s3_bucket.sh --name ${SINDRI_STATE_BUCKET}
+          AWS_PROFILE=backend /scripts/create_s3_bucket.sh --name ${SINDRI_CONFIG_BUCKET}
+        """
+      }
+    }
+
+    stage("Create Common Layer") { 
+      when {
+        allOf {
+          environment name:'ACTION', value:'apply';
+          environment name:'COMMON_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+         dir('terraform') {
+            sh """
+              sh ./tf.sh --force-init --apply --role ${params.ENVIRONMENT} --layer ${DEFAULT_COMMON_LAYER_NAME}
+              cd ./common
+              terraform output -json>./COMMON_LAYER.json
+              aws s3 cp COMMON_LAYER.json s3://${SINDRI_CONFIG_BUCKET}/config-${params.ENVIRONMENT}-${DEFAULT_COMMON_LAYER_NAME}.json --profile backend
+            """
+          dir('common'){
+            stash includes: 'COMMON_LAYER.json', name: 'COMMON_CONFIG'
+          }
+        }
+      }
+    }
+    
+    stage("Check Data Layer") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'check';
+          environment name:'DATA_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        AWS_SINDRI_RDS_CREDENTIALS_ACCESS = credentials("${AWS_RDS_USER_CREDS}")
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            export TF_VAR_db_master_username=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_USR}
+            export TF_VAR_db_master_password=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_PSW}
+            sh ./tf.sh --force-init --role ${params.ENVIRONMENT} --layer ${DEFAULT_DATA_LAYER_NAME} --workspace ${SINDRI_WORKSPACE}
+          """
+        }
+      }
+    }
+
+    stage("Create Data Layer") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'apply';
+          environment name:'DATA_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        AWS_SINDRI_RDS_CREDENTIALS_ACCESS = credentials("${AWS_RDS_USER_CREDS}")
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            export TF_VAR_db_app_username=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_USR}
+            export TF_VAR_db_app_password=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_PSW}
+            export TF_VAR_db_master_username=${AWS_SINDRI_RDS_OWNER_CREDENTIALS_ACCESS_USR}
+            export TF_VAR_db_master_password=${AWS_SINDRI_RDS_OWNER_CREDENTIALS_ACCESS_PSW}
+            sh ./tf.sh --force-init --apply --role ${params.ENVIRONMENT} --layer ${DEFAULT_DATA_LAYER_NAME} --workspace ${SINDRI_WORKSPACE}
+            cd ./data
+            terraform output -json>./DATA_LAYER.json
+            cat ./DATA_LAYER.json
+            aws s3 cp DATA_LAYER.json s3://${SINDRI_CONFIG_BUCKET}/config-${params.ENVIRONMENT}-${DEFAULT_DATA_LAYER_NAME}-${params.SINDRI_NAMESPACE}.json --profile backend
+          """
+          dir('data'){
+            stash includes: 'DATA_LAYER.json', name: 'DATA_CONFIG'
+          }
+        }
+      }
+    }
+
+    stage("Check Main Layer") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'check';
+          environment name:'MAIN_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+     agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        AWS_SINDRI_RDS_CREDENTIALS_ACCESS = credentials("${AWS_RDS_USER_CREDS}")
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            export TF_VAR_db_master_username=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_USR}
+            export TF_VAR_db_master_password=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_PSW}
+            export TF_VAR_k8s_namespace=${params.SINDRI_NAMESPACE}
+            sh ./tf.sh --force-init --role ${params.ENVIRONMENT} --layer ${DEFAULT_MAIN_LAYER_NAME} --workspace ${SINDRI_WORKSPACE}
+          
+          """
+        }
+      }
+    }
+    stage("Create Main Layer") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'apply';
+          environment name:'MAIN_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        AWS_SINDRI_RDS_CREDENTIALS_ACCESS = credentials("${AWS_RDS_USER_CREDS}")
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            export TF_VAR_db_app_username=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_USR}
+            export TF_VAR_db_app_password=${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_PSW}
+            export TF_VAR_db_master_username=${AWS_SINDRI_RDS_OWNER_CREDENTIALS_ACCESS_USR}
+            export TF_VAR_db_master_password=${AWS_SINDRI_RDS_OWNER_CREDENTIALS_ACCESS_PSW}
+            export TF_VAR_k8s_namespace=${params.SINDRI_NAMESPACE}
+            sh ./tf.sh --force-init --apply --role ${params.ENVIRONMENT} --layer ${DEFAULT_MAIN_LAYER_NAME} --workspace ${SINDRI_WORKSPACE}
+            cd ./main
+            terraform output -json>./MAIN_LAYER.json  
+            aws s3 cp MAIN_LAYER.json s3://${SINDRI_CONFIG_BUCKET}/config-${params.ENVIRONMENT}-${DEFAULT_MAIN_LAYER_NAME}-${params.SINDRI_NAMESPACE}.json --profile backend
+          """
+          dir('main'){
+            stash includes: 'MAIN_LAYER.json', name: 'MAIN_CONFIG'
+          }
+        }
+      }
+    }
+
+    stage('Create location service') {
+      when {
+        environment name:'ACTION', value:'apply';
+        environment name:'MAIN_LAYER', value:'true';
+        expression { params.IMAGE_TAG != "Change me" }
+      }
+      agent {
+        docker {
+            image "${AWS_IMAGE}"
+            reuseNode true
+        }
+      }
+      steps {
+        script {
+          sh (script: "./scripts/create_location_place_index.sh ${AWS_LOCATION_PLACE_INDEX_NAME}", returnStatus: false)
+        }
+      }
+    }
+
+    stage("Create Users") {
+      when {
+        allOf {
+        expression { params.CREATE_USERS == true }
+        expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }     
+      steps {
+        dir('terraform') {
+          sh """
+            sh ./tf.sh --force-init --workspace ${params.SINDRI_WORKSPACE} --role ${params.ENVIRONMENT} --layer data
+            cd ./data
+            AWS_PROFILE=target bash ./scripts/users.sh add
+          """
+        }
+      }
+    }
+
+    stage("Delete Users") {
+      when {
+        allOf {
+        expression { params.DELETE_USERS == true }
+        expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }      
+      steps {
+        dir('terraform') {
+          sh """
+            sh ./tf.sh --force-init --workspace ${params.SINDRI_WORKSPACE} --role ${params.ENVIRONMENT} --layer data
+            sh ./scripts/assume-role.sh ${AWS_ACCOUNT_ID} ${params.ENVIRONMENT}
+            cd ./data
+            AWS_PROFILE=target bash ./scripts/users.sh delete
+          """
+        }
+      }
+    }
+
+    stage("Send Cognito users list to S3") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'apply';
+          anyOf {
+            environment name:'DATA_LAYER', value: 'true';
+            environment name:'MAIN_LAYER', value: 'true';
+            expression { params.IMAGE_TAG != "Change me" }
+          }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            sh ./tf.sh --force-init --workspace ${params.SINDRI_WORKSPACE} --role ${params.ENVIRONMENT} --layer data
+            cd ./data
+            aws cognito-idp list-users --user-pool-id \$(terraform output user_pool_id) --region eu-central-1 --profile target>./users.json
+            aws s3 cp users.json s3://${SINDRI_CONFIG_BUCKET}/users-${params.ENVIRONMENT}-${params.SINDRI_NAMESPACE}.json --profile backend
+          """
+        }
+      }
+    }
+
+    stage("Destroy Main Layer") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'destroy';
+          environment name:'MAIN_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+         dir('terraform') {
+           sh """
+             export TF_VAR_k8s_namespace=${params.SINDRI_NAMESPACE}
+             AWS_PROFILE=target sh ./destroy.sh --layer ${DEFAULT_MAIN_LAYER_NAME} --role ${params.ENVIRONMENT} --workspace ${SINDRI_WORKSPACE} --force-init --force-destroy
+           """
+         }
+      }
+    }
+
+    stage("Destroy Data Layer") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'destroy';
+          environment name:'DATA_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            AWS_PROFILE=target sh ./destroy.sh --layer ${DEFAULT_DATA_LAYER_NAME} --role ${params.ENVIRONMENT} --workspace ${SINDRI_WORKSPACE} --force-init --force-destroy
+          """
+        }
+      }
+    }
+
+    stage("Destroy Common Layer") {
+      when {
+        allOf {
+          environment name:'ACTION', value:'destroy';
+          environment name:'COMMON_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            AWS_PROFILE=target sh ./destroy.sh --layer ${DEFAULT_COMMON_LAYER_NAME} --role ${params.ENVIRONMENT} --force-init --force-destroy
+          """
+        }
+      }
+    }
+    stage('Destroy location service') {
+      when {
+        environment name:'ACTION', value:'destroy';
+        environment name:'MAIN_LAYER', value:'true';
+        expression { params.IMAGE_TAG != "Change me" }
+      }
+      agent {
+        docker {
+            image "${AWS_IMAGE}"
+            reuseNode true
+        }
+      }
+      steps {
+        script {
+          sh (script: "./scripts/delete_location_place_index.sh ${AWS_LOCATION_PLACE_INDEX_NAME}", returnStatus: false)
+        }
+      }
+    }
+  
+    stage('Get COMMON LAYER configmap values'){
+      when{
+        allOf{
+          environment name:'ACTION', value:'apply';
+          environment name:'COMMON_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+      }
+      steps {
+        unstash 'COMMON_CONFIG'
+        script {
+          def dataOutputs = readJSON file: "COMMON_LAYER.json", returnPojo: true
+          env.AUTHORIZER_ROLE_ARN = dataOutputs.authorizer_role_arn.value
+        }
+      }
+    }
+
+    stage('Get DATA LAYER configmap values'){
+      when{
+        allOf{
+          environment name:'ACTION', value:'apply';
+          environment name:'DATA_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+      }
+      steps {
+        unstash 'DATA_CONFIG'
+        script {
+          def dataOutputs = readJSON file: "DATA_LAYER.json", returnPojo: true
+          env.PG_DB_HOST = dataOutputs.db_hostname.value
+          env.PG_DB_NAME = dataOutputs.db_name.value
+          env.PG_DB_PORT = dataOutputs.db_port.value
+          env.DYNAMO_REPORTS_TABLE_NAME = dataOutputs.dynamo_reports_table_name.value
+          env.DYNAMO_CUSTOMER_UID_UPLOAD_DATE_INDEX = dataOutputs.dynamo_customer_uid_upload_date_index.value
+          env.DYNAMO_CUSTOMER_UID_SCAN_DATE_INDEX = dataOutputs.dynamo_customer_uid_scan_date_index.value
+          env.USER_POOL_ID = dataOutputs.user_pool_id.value
+          env.CUSTOMER_POOL_ID = dataOutputs.user_pool_customer_api_id.value
+          env.COVERAGEDB_RAW_BUCKET = dataOutputs.coveragedb_raw_bucket.value
+          env.COVERAGEDB_FINAL_BUCKET = dataOutputs.coveragedb_final_bucket.value
+          env.LEGAL_DOCUMENTATION_BUCKET_NAME = dataOutputs.legal_documentation_bucket_name.value
+          env.REPORTS_BUCKET = dataOutputs.reports_bucket.value
+          env.TF_COGNITO_DOMAIN_URL = dataOutputs.user_pool_domain_url.value
+          env.TF_USER_POOL_ID = dataOutputs.user_pool_id.value
+          env.TF_CLIENT_ID = dataOutputs.client_id.value
+          env.TF_CLIENT_SECRET = dataOutputs.client_secret.value
+          env.TF_AUTH_ISSUER = dataOutputs.user_pool_endpoint.value
+          env.S3_BILLING_BUCKET = dataOutputs.billing_bucket_name.value
+          env.FROM_EMAIL_ADDRESS = dataOutputs.from_reply_address.value
+          env.WEBPORTAL_DOMAIN_URL = dataOutputs.sindri_dns_name.value
+        }
+      }
+    }
+
+    stage('Get MAIN LAYER configmap values'){
+      when{
+        allOf{
+          environment name:'ACTION', value:'apply';
+          environment name:'MAIN_LAYER', value:'true';
+          expression { params.IMAGE_TAG != "Change me" }
+        }
+      }
+      steps {
+        unstash 'MAIN_CONFIG'
+        script {
+          def mainOutputs = readJSON file: "MAIN_LAYER.json", returnPojo: true
+          env.SQS_QUEUE_URL = mainOutputs.coveragedb_queue_id.value
+          env.TF_API_BASE_URL = mainOutputs.sindri_api_base_url.value
+          env.TF_WEBPORTAL_BASE_URL = mainOutputs.sindri_webportal_base_url.value
+        }
+      }
+    }
+    
+    stage('Encrypt data') {
+        when {
+          allOf{
+                environment name:'ACTION', value:'apply';
+                expression { params.IMAGE_TAG != "Change me" }
+            }
+          }
+          agent {
+            docker {
+              image "${REPO_CI_PULL}/mozilla/sops:v3-alpine"
+              args "--entrypoint=''"
+              reuseNode true
+              alwaysPull true
+              registryUrl "https://${REPO_CI_PULL}"
+              registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+            }
+          }
+          environment {
+            AWS_SINDRI_RDS_CREDENTIALS_ACCESS = credentials("${AWS_RDS_USER_CREDS}")
+            PG_DB_OWNER_USERNAME = "${AWS_SINDRI_RDS_OWNER_CREDENTIALS_ACCESS_USR}"
+            PG_DB_OWNER_PASSWORD = "${AWS_SINDRI_RDS_OWNER_CREDENTIALS_ACCESS_PSW}"
+            PG_DB_USERNAME = "${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_USR}"
+            PG_DB_PASSWORD = "${AWS_SINDRI_RDS_CREDENTIALS_ACCESS_PSW}"
+            HMAC_SECRET_KEY = credentials('sindri-hmac-secret-key')
+          }
+          steps {
+            withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+                sh """
+                sh secret.sh
+                """
+            }
+          }
+        }
+      
+    stage('Create K8S resources') {
+      when {
+        allOf{
+            environment name:'ACTION', value:'apply';
+            environment name:'COMMON_LAYER', value:'true';
+            environment name:'DATA_LAYER', value:'true';
+            environment name:'MAIN_LAYER', value:'true';
+            expression { params.IMAGE_TAG != "Change me" }
+        }
+        beforeAgent true
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_TOOLSET_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        script {
+          env.SSH_AUTH_SOCK="/ssh-agent"
+        }
+        sshagent (credentials: ['gitlab-jenkins-ssh']) {
+          withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID],
+            file(credentialsId: GIT_GPG_CREDENTIALS_ID, variable: 'GIT_GPG')
+          ]) {
+              sh """
+              sh deploy.sh
+              """
+          }
+        }
+      }
+    }
+  }
+  post {
+    always {
+      cleanWs()
+    }
+  }
+}
+
+def getSindriDBCreds() {
+  if (params.ENVIRONMENT.equalsIgnoreCase("production") && params.SINDRI_WORKSPACE.equalsIgnoreCase("prod") ) {
+    return "sindri_prod_pg_creds"
+  }
+  return "sindri_readwrite_pg_creds"
+}

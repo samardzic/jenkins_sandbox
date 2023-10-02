@@ -1,0 +1,256 @@
+// Import SharedLib located at https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/tree/master/vars
+@Library(['Common', 'my-sindri-library']) _
+
+K8S_TOOLSET_IMAGE = 'cloud/continental/builds/k8s-toolset:1.19'
+K8S_AWS_IMAGE = 'cloud/continental/builds/k8s-aws'
+IMAGE_NAME = 'webportal'
+UNIQUE_VERSION = UUID.randomUUID().toString()
+DEFAULT_COMMIT_HASH='master'
+
+DEFAULT_NAMESPACE = 'sindri-v2-2'
+DEFAULT_WORKSPACE = 'v2-2'
+DEFAULT_PARAM = 'Change me'
+
+
+pipeline {
+  agent {
+    label 'default'
+  }
+
+
+  options {
+    ansiColor('xterm')
+    disableConcurrentBuilds()
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  environment {
+    // Set version under the schemed format (method from shared lib)
+    SCHEMED_VERSION = getSchemedVersion()//???
+    // Project Name in Harbor
+    PROJECT_NAME = 'sindri'
+    // Jenkins secret to get deployment role
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+    // Stable branch name
+    STABLE_BRANCH = 'master'
+    // Password for REAL SUPER IMPORTANT Project in Harbor like Sindri
+    REPO_CD_PUSH_CREDENTIALS_ID = 'harbor-robot-sindri'
+    // Jenkins parameters file
+    PARAMETERS_FILE = 'jenkins_parameters.json'
+  }
+
+  stages {
+
+    stage('Setup parameters and environment') {
+      steps {
+        dir('configuration') {
+          git branch : "main",
+          credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+          url: "git@code.tooling.prod.cdsf.io:sindri/sindri.configuration.git"
+          script {
+            WORKSPACE_SINDRI=buildDynamicParameters("$PARAMETERS_FILE", "workspace")
+            NAMESPACE=buildDynamicParameters("$PARAMETERS_FILE", "namespace")
+            ENV=buildDynamicParameters("$PARAMETERS_FILE", "environment")
+            AWS_REGION=buildDynamicParameters("$PARAMETERS_FILE", "region")
+            properties([
+              parameters([
+                choice(choices: "${WORKSPACE_SINDRI}", name: 'SINDRI_WORKSPACE', description: 'Terraform workspace'),
+                choice(choices: "${NAMESPACE}", name: 'SINDRI_NAMESPACE', description: 'Sindri Namespace'),
+                choice(choices: "${ENV}", name: 'ENVIRONMENT', description: 'Target environment'),
+                choice(choices: "${AWS_REGION}", name: 'REGION', description: 'AWS region to which to deploy'),
+                string(name: 'COMMIT_HASH', defaultValue: "${DEFAULT_COMMIT_HASH}", description: 'A specific commit hash can be specified')
+              ])
+            ])
+          // Get Environment short name from Common lib
+          env.ENVIRONMENT_SHORT_NAME = getEnvShortName(params.ENVIRONMENT)
+          // AWS Account ID (function from Common shared lib)
+          // used for cognito iam annotation
+          env.AWS_ACCOUNT_ID = getAwsAccountID(params.ENVIRONMENT, params.REGION)
+          // Get docker registry hostname (method from shared lib : https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/blob/master/vars/getDockerRegistryHostname.groovy)
+          env.DOCKER_REGISTRY_HOSTNAME = getDockerRegistryHostname(params.REGION, params.ENVIRONMENT)
+          // Replace with default workspace name if value is "change me"
+          env.SINDRI_WORKSPACE = params.SINDRI_WORKSPACE.contains("$DEFAULT_PARAM") ? DEFAULT_WORKSPACE : params.SINDRI_WORKSPACE
+          // Replace with default namespace name if value is "change me"
+          env.SINDRI_NAMESPACE = params.SINDRI_NAMESPACE.contains("$DEFAULT_PARAM") ? DEFAULT_NAMESPACE : params.SINDRI_NAMESPACE
+          // Replace with default commit hash value if value is empty
+          env.COMMIT_HASH = params.COMMIT_HASH == "" ? DEFAULT_COMMIT_HASH : params.COMMIT_HASH
+          }
+        }
+      }
+    }
+
+    stage('Checkout specific commit') {
+      when { expression { params.COMMIT_HASH != "${DEFAULT_COMMIT_HASH}" }}
+      steps { 
+        script {
+          sh "git checkout ${COMMIT_HASH}"
+        }
+      }
+    }
+
+    stage('Build info') {
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CI_PULL_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker version"
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CI_PULL}\""
+        }
+        script {
+          sh "echo REGION=${params.REGION}"
+          sh "echo SINDRI_WORKSPACE=${SINDRI_WORKSPACE}"
+          sh "echo SINDRI_NAMESPACE=${SINDRI_NAMESPACE}"
+          sh "echo ENVIRONMENT=${params.ENVIRONMENT}"
+          sh "echo DOCKER_REGISTRY_HOSTNAME=${DOCKER_REGISTRY_HOSTNAME}"
+          sh "echo AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}"
+          sh "echo ENVIRONMENT_SHORT_NAME=${ENVIRONMENT_SHORT_NAME}"
+          sh "echo COMMIT_HASH=${COMMIT_HASH}"
+        }
+      }
+    }
+        
+    stage('Check the Git commit convention') {
+       when {
+          expression { env.BRANCH_NAME.startsWith('MR') }
+      }
+      steps {
+        script {
+          def configurationJob=build job: "../sindri%2Fsindri.configuration/main",propagate:false, wait: true, parameters: [
+            string(name: 'ACTION', value: 'check-git-commit-convention'),
+            string(name: 'ACTION_INPUT_VALUE', value: env.CHANGE_TITLE),
+          ]
+          if  ( configurationJob.result != 'SUCCESS' ) {
+            currentBuild.result = 'FAILURE'
+            error(configurationJob.getBuildVariables().get("BUILD_FAILED_MESSAGE"))
+          }
+        }
+      }
+    }
+
+    stage('Get K8S kubeconfig') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          args "--entrypoint=''"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+        steps {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID]]) {
+            sh "aws s3 cp s3://${KUBECONFIG_S3_BUCKET}/${params.ENVIRONMENT}/${params.REGION}/projects/kubeconfig-sindri-jenkins kubeconfig.conf"
+        }
+      }
+    }
+
+
+    stage('CI - Unit tests') {
+        agent {
+            docker { image 'node:14-alpine' }
+        }
+        environment { 
+          // Solve npm install EACCESS error
+          HOME = "."
+        }
+        steps {
+            sh 'npm i'
+            sh 'npm run unit'
+        }
+    }
+
+    stage('CI - Build config') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_AWS_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment { 
+        KUBECONFIG = "${WORKSPACE}/kubeconfig.conf"
+      }
+      steps {
+        sh '''
+         sh config.sh
+        '''
+      }
+    }
+
+
+    stage('CI - Build image') {
+      when { anyOf { branch "${STABLE_BRANCH}" ; branch "v*"} }
+      steps {
+        sh "docker build -t ${IMAGE_NAME}:${UNIQUE_VERSION} ."
+      }
+    }
+
+    stage('Push images to Harbor') {
+      when { anyOf { branch "${STABLE_BRANCH}" ; branch "v*"} }
+      environment {
+        IMAGE_TAG = sh (
+          script: 'echo -n $(cat VERSION)-$(cat GIT_COMMIT)-${ENVIRONMENT}-${SINDRI_WORKSPACE}',
+          returnStdout: true
+        ).trim()
+      }
+      steps {
+        withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: REPO_CD_PUSH_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+          sh "docker tag ${IMAGE_NAME}:${UNIQUE_VERSION} ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+          sh "echo \"\${PASSWORD}\" | docker login -u \"\${USERNAME}\" --password-stdin \"\${REPO_CD_HOSTNAME}\""
+          sh "docker push ${REPO_CD_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+          sh "docker image ls"
+        }
+      }
+    }
+
+
+    stage('CD - Deploy') {
+      when { anyOf { branch "${STABLE_BRANCH}" ; branch "v*"} }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_TOOLSET_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        IMAGE_TAG = sh (
+          script: 'echo -n $(cat VERSION)-$(cat GIT_COMMIT)-${ENVIRONMENT}-${SINDRI_WORKSPACE}',
+          returnStdout: true
+        ).trim()
+      }
+      steps {
+       sshagent (credentials: ['gitlab-jenkins-ssh']) {
+           withCredentials([
+             [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CREDENTIALS_ID],
+             file(credentialsId: GIT_GPG_CREDENTIALS_ID, variable: 'GIT_GPG')
+           ]) {
+              sh """
+              sh deploy.sh
+              """
+          }
+        }
+      }
+    }
+  }
+  post {
+    failure {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME == "v*" || env.BRANCH_NAME.startsWith('MR') || env.IMAGE_TAG != null) {
+          slackSend color: 'danger', channel: '#sindri-cicd', message: ":jenkins-devil: Jenkins ${env.JOB_NAME} Job : Failed ! (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+    }
+
+    always {
+      script {
+        sh "docker rmi -f \$(docker images -q ${IMAGE_NAME}:${UNIQUE_VERSION}) || exit 0"
+        sh "docker rmi -f \$(docker images -q ${IMAGE_NAME}:tools-${UNIQUE_VERSION}) || exit 0"
+      }
+      cleanWs()
+    }
+  }
+}

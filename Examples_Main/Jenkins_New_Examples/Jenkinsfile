@@ -1,0 +1,96 @@
+// Import SharedLib located at https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/tree/master/vars
+@Library(['Common', 'my-sindri-library']) _
+
+K8S_TOOLSET_IMAGE = 'cloud/continental/builds/k8s-toolset:1.19'
+
+pipeline {
+  agent { label 'default' }
+
+  options {
+    timeout(time: 20, unit: 'MINUTES')
+    disableConcurrentBuilds()
+    ansiColor('xterm')
+  }
+
+  environment {
+    // Stable branch name
+    STABLE_BRANCH = 'main'
+    // Jenkins secret to get deployment role
+    AWS_CREDENTIALS_ID = 'aws-SA_sindri_deployment'
+    // Jenkins parameters file
+    PARAMETERS_FILE = 'jenkins_parameters.json'
+    // Default parameter
+    DEFAULT_PARAM = 'Change me'
+    // Default SINDRI_NAMESPACE
+    DEFAULT_NAMESPACE = 'sindri-v2-2'
+
+  }
+
+  stages {
+    stage('Setup parameters and environment') {
+      steps {
+        dir('configuration') {
+          git branch : "main",
+          credentialsId: "${GIT_SSH_CREDENTIALS_ID}",
+          url: "git@code.tooling.prod.cdsf.io:sindri/sindri.configuration.git"
+          script {
+            NAMESPACE=buildDynamicParameters("$PARAMETERS_FILE", "namespace")
+            ENV=buildDynamicParameters("$PARAMETERS_FILE", "environment")
+            AWS_REGION=buildDynamicParameters("$PARAMETERS_FILE", "region")
+            properties([
+              parameters([
+                choice(choices: "${NAMESPACE}", name: 'SINDRI_NAMESPACE', description: 'Sindri Namespace'),
+                choice(choices: "${ENV}", name: 'ENVIRONMENT', description: 'Target environment'),
+                choice(choices: "${AWS_REGION}", name: 'REGION', description: 'AWS region to which to deploy'),
+              ])
+            ])
+          // Get Environment short name from Common lib
+          SINDRI_NAMESPACE = params.SINDRI_NAMESPACE.contains("$DEFAULT_PARAM") ? DEFAULT_NAMESPACE : params.SINDRI_NAMESPACE
+          env.ENVIRONMENT_SHORT_NAME = getEnvShortName(params.ENVIRONMENT)
+          env.ENVIRONMENT_NAMESPACE = "${SINDRI_NAMESPACE}"
+          
+          } 
+        }
+      }
+    }
+
+    stage('Deploy') {
+      when {
+        allOf {
+         branch "${env.STABLE_BRANCH}"
+        }
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_TOOLSET_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+
+      steps {
+       sshagent (credentials: ['gitlab-jenkins-ssh']) {
+         withCredentials([
+            file(credentialsId: GIT_GPG_CREDENTIALS_ID, variable: 'GIT_GPG')
+          ]) {
+            sh label: "Deploy", script: """
+              sh deploy.sh ${ENVIRONMENT_NAMESPACE}
+            """
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    failure {
+      script {
+        if (env.BRANCH_NAME == "${STABLE_BRANCH}" || env.BRANCH_NAME.startsWith('MR')) {
+          slackSend color: 'danger', channel: '#sindri-cicd', message: ":jenkins-devil: Jenkins ${env.JOB_NAME} Job : Failed for ${params.target}. (<${env.BUILD_URL}|#${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+    }
+  }
+}
