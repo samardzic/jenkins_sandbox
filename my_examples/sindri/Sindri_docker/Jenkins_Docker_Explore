@@ -1,0 +1,174 @@
+pipeline {
+    
+    agent {
+        label 'nhl2283w_laptop'
+    }
+    
+    // agent {
+    //     docker { 
+    //         image 'maven:3-alpine'
+    //         // label 'my-defined-label'
+    //         // args  '-v /tmp:/tmp'
+    //     }
+    // }
+    
+    
+    environment {
+        PROJECT_ROOT_PATH = "c:\\Sindri-WebPortal-Automation"
+        ROOT_PATH = "$env.PROJECT_ROOT_PATH"
+        CUSTOM_WS = "$env.PROJECT_ROOT_PATH"
+        REGISTRY = 'nsamardzic/python_selenium_chrome:chrome-91'
+        // REGISTRY_CREDENTIALS = "docker_webPortal_key"
+        // REGISTRY_CREDENTIALS = credentials('docker_webPortal_key')
+        // DOCKER_IMAGE = 'nsamardzic/python_selenium_chrome:chrome-91'
+        DOCKER_IMAGE = 'nsamardzic/python_selenium_chromedriver'
+        DOCKER_CONTAINER = "python_selenium_chrome"
+    }
+    
+    
+    stages {
+        
+        
+        stage('List Docker elements') {
+            steps {
+                script{
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat 'docker images'
+                            bat 'docker ps -a'
+                        } catch (err) {
+                            echo 'Docker elements listing Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        stage('Stop All docker containers'){
+            steps{
+                script{
+                    dir("$env.CUSTOM_WS") {
+                        containers_all = powershell(
+                            returnStdout: true, script: 'docker container ps -aq').trim()
+                        containers = containers_all.readLines().join(" ")
+                        if (containers) {
+                            bat "docker stop ${containers}"
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        stage('Remove project specific docker containers'){
+            steps{
+                script{
+                    dir("$env.CUSTOM_WS") {
+                        containers_all = powershell(
+                            returnStdout: true, script: 'docker container ps -aq --filter ancestor=\$env:DOCKER_IMAGE').trim()
+                        containers = containers_all.readLines().join(" ")
+                        if (containers) {
+                            bat "docker rm ${containers}"
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        stage('Docker Run') {
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                docker run -t --detach --name ${env.DOCKER_CONTAINER} ${env.DOCKER_IMAGE}
+                                docker ps -a
+                                docker images
+                                """
+                        } catch (err) {
+                            echo 'Docker Run Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        // stage('Docker image') {
+        //     steps {
+        //         script {
+        //             // DOCKER_IMAGE = docker.build REGISTRY
+        //             // DOCKER_IMAGE.pull()
+        //             withDockerContainer('nsamardzic/python_selenium_chromedriver') {
+        //             // some block
+        //                 sh "docker run --name nsamardzic/python_selenium_chromedriver --rm -p 8082:8080 jenkins:jcasc"
+        //             }
+        //         }
+        //     }
+        // }
+        
+        
+        // stage('Pull latest version of Docker image') {
+        //     steps {
+        //         script {
+        //             docker.withRegistry('', REGISTRY_CREDENTIALS) {
+        //                 DOCKER_IMAGE.pull()
+        //             }
+        //         }
+        //     }
+        // }
+        
+        // stage('Docker pull') {
+            
+        //     steps {
+        //         script {
+        //             DOCKER_IMAGE.pull()
+        //         }
+        //     }
+            
+        // }
+        
+        
+        
+        // stage('Docker init') {
+            
+        //     // agent {
+        //     //     docker { 
+        //     //         // image 'maven:3-alpine'
+        //     //         image 'node:7-alpine'
+        //     //     }
+        //     // }
+            
+            
+            
+        //     steps {
+        //         script {
+        //             dir("$env.CUSTOM_WS") {
+        //                 DOCKER_IMAGE.pull()
+        //                 // echo 'whoami'
+        //                 // bat 'ls -l'
+        //                 // sh ("docker build --rm --build-arg JOB_NAME=${sanitisedJobName()} -t ${containerName()} .")
+        //                 // sh 'mvn -B clean faric8:build faric8:deploy verify'
+        //                 // dockerImage.run("--publish 9005:9005 --rm -t --detach --name dcl_container33")
+        //             }
+        //         }
+        //     }
+            
+            
+            
+        // }
+        
+        
+    }
+    
+    
+}
