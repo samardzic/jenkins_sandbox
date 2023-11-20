@@ -1,0 +1,58 @@
+pipeline {
+    agent {
+        label 'cicd3_win_nhd2322w'
+    }
+    
+    
+    stages{
+        
+        stage("Execute WebPortal Job"){
+            steps{
+                build job: "Sindri_WebPortal_MAIN_Windows",
+                parameters: [
+                    
+                    // Selecting the TEST_SUITE for the test execution. Available options are:
+                    // ['webPortal', 'webShop', 'jnkTest', 'smoke', 'deleteAPI', 'billing', 'integrationTests', 'emailTests']
+                    string(name: 'TEST_SUITE', value:'webPortal'),
+                    
+                    
+                    // Selecting the specific GIT_BRANCH for test execution. Available options are:
+                    // ['main', 'development', 'active_dev']
+                    string(name: 'GIT_BRANCH', value:'main'),
+                    
+                    
+                    // Selecting the TEST_ENVIRONMENT for the test execution. Available options are:
+                    // ['vv', 'cicd', 'dev', 'cicd_api']
+                    string(name: 'TEST_ENVIRONMENT', value:'vv'),
+                    
+                    
+                    // Selecting the number of TEST_RERUNS for the failed tests. Available options are:
+                    // [0, 1, 2, 3]
+                    string(name: 'TEST_RERUNS', value:'1'),
+                    
+                    
+                    // Selecting the specific TEST_USER for the test execution. Available options are:
+                    // ['user_main', 'user_jenkins', 'user_nenad', 'user_api', 'user_dragana', 'user_maja']
+                    string(name: 'TEST_USER', value:'user_main'),
+                    
+                    
+                    // Selecting the specific TEST_BROWSER on which tests are going to be executed. Available options are:
+                    // ['chrome', 'firefox', 'safari', 'ie', 'edge']
+                    string(name: 'TEST_BROWSER', value:'chrome'),
+                    
+                    
+                    // Declaring if we want to email test execution results to specific user list. Available options are:
+                    // ['true' - send test execution results, 'false' - do not send test execution results]
+                    booleanParam(name: 'SEND_EXECUTION_RESULTS', value:true),
+                    
+                    
+                    // Declaring if we want to publish API logs generted in test execution. Available options are:
+                    // ['true' - publish API logs, 'false' - do not publish API logs]
+                    booleanParam(name: 'PUBLISH_API_LOGS', value:false)
+                    
+                    ],
+                wait: true
+            }
+        }
+    }
+}

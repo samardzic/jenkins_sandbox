@@ -1,0 +1,77 @@
+pipeline {
+    
+    agent{ 
+        label 'nhl2283w_laptop'
+    }
+    
+    
+    
+    parameters {
+        
+        // string(name: "TEST_SUITE", defaultValue: "jnkTest", description: "This is for TEST_STRING") 
+        // text(name: "TEST_TEXT", defaultValue: "One\nTwo\nThree\n", description: "This is for TEST_TEXT")
+        // booleanParam(name: "TEST_BOOLEAN", defaultValue: true, description: "This is for TEST_BOOLEAN")
+        // choice(name: "TEST_CHOICE", choices: ["one", "two", "three"], description: "This is TEST_CHOICE")
+        // password(name: "TEST_PASSWORD", defaultValue: "SECRET", description: "This is TEST_PASSWORD")
+        
+        choice(
+            name: "GIT_BRANCH", choices: ['main', 'development', 'active_dev'],
+            description: 'Available TEST SUITES for test execution')
+        choice(
+            name: "TEST_BROWSER", choices: ['chrome', 'firefox', 'safari', 'ie', 'edge'],
+            description: 'Available USERS for test execution')
+        choice(
+            name: "TEST_RERUNS", choices: [1, 0, 2, 3],
+            description: 'Number of TEST RERUNS for failed test')
+        booleanParam(
+            name: "SEND_EXECUTION_RESULTS", 
+            defaultValue: true, 
+            description: "Sending email containing test execution report.")
+    }
+
+
+
+
+    stages{
+        
+        
+        stage('Checkout to specific branch') {
+            steps {
+                echo "GIT branch selected is: --- ${params.GIT_BRANCH} ---"
+            }   
+        }        
+        
+        
+        stage('Browser selection Parameter') {
+            steps {
+                echo "Browser selected is: --- ${params.TEST_BROWSER} ---"
+            }   
+        }        
+        
+        
+        stage('Number of Reruns for Failed tests') {
+            steps {
+                echo "Number of Reruns for Failed tests is: --- ${params.TEST_RERUNS} ---"
+            }   
+        }        
+        
+        
+        stage('Send execution results') {
+            when {
+                expression{params.SEND_EXECUTION_RESULTS == true}
+            }
+            
+            steps {
+                script {
+                    echo "Send execution result conditional velue is: --- ${params.SEND_EXECUTION_RESULTS} ---"
+                }
+            }
+        }
+        
+        
+        
+        
+    }
+    
+    
+}
