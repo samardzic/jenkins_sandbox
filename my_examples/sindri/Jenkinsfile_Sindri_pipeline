@@ -1,18 +1,68 @@
 pipeline {
-    agent any
+    
+    agent {
+        label 'cicd3_win_nhd2322w'
+    }
+
+
+    triggers {
+        // MINUTE (0-59), HOUR (0-23), DAY (1-31), MONTH (1-12), DAY OF THE WEEK (0 Sunday-6 Saturday)
+        cron('H 19 * * 0-6')
+    }
+
+
+    options {
+        buildDiscarder(logRotator(
+            artifactNumToKeepStr: '', 
+            daysToKeepStr: '', 
+            numToKeepStr: '4'))
+        disableConcurrentBuilds()
+        timeout(time: 3, unit: 'HOURS')   // timeout on whole pipeline job
+    }
+
+
+    parameters {
+        choice(
+            name: "TEST_SUITE", choices: ['webPortal', 'smoke', 'jnkTest', 'webShop'],
+            description: 'Available TEST SUITES for test execution')
+        booleanParam(
+            name: "PUBLISH_API_LOGS", 
+            defaultValue: false, 
+            description: "Publish API logs generated during execution.")
+    }
+
     
     environment {
         DOCKER_REGISTRY = 'nsamardzic/python_selenium_chrome'
     }
+
+
+
+
     
     stages{
         
 
         
         stage('Checkout to specific branch') {
-            options {
-                timeout(time: 30, unit: 'SECONDS')
+
+
+            triggers {
+                // MINUTE (0-59), HOUR (0-23), DAY (1-31), MONTH (1-12), DAY OF THE WEEK (0 Sunday-6 Saturday)
+                cron('H 19 * * 0-6')
             }
+    
+            options {
+                buildDiscarder(logRotator(
+                    artifactNumToKeepStr: '', 
+                    daysToKeepStr: '', 
+                    numToKeepStr: '4'))
+                disableConcurrentBuilds()
+                // disableConcurrentBuilds(abortPrevious: true)
+                timeout(time: 3, unit: 'HOURS')   // timeout on whole pipeline job
+            }
+
+
             steps {
                 script {
                     try {

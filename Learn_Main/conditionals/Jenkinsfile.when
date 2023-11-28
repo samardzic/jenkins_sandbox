@@ -1,0 +1,68 @@
+pipeline {
+
+    agent {
+        label 'cicd3_win_nhd2322w'
+    }
+    
+    options {
+        timeout(time: 10, unit: 'HOURS')   // timeout on whole pipeline job
+    }
+
+    stages{
+    
+        stage('Executing Suite Preconditions') {
+            when {
+                expression{params.PRECONDITION_SUITE == true}
+            }
+            options {
+                timeout(time: 60, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS"){
+                        try{
+                            sleep(time:5, unit:'SECONDS')
+                            bat """
+                            "${PYTHON_SQUISH}" tests\\suite_tag_test_runner\\tst_tag_test_runner\\test.py -m precondition --env ${env.ENVIROMENT_STAGE}
+                            """
+                            sleep(time:5, unit:'SECONDS')
+                        }catch (err) {
+                            echo 'Suite Preconditions failed'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }
+
+
+        stage('Create properties.ini') {
+            options {
+                timeout(time: 2, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.PROPERTIES_INI"){
+                        try{
+                            if (env.ENVIROMENT_STAGE=='CICD') {
+                                bat """
+                                "${PYTHON_SQUISH}" configuration.py -u %USER_NAME_ADMIN% -p %ADMIN_PASSWORD% -ci %CLIENT_ID_CICD% -cs %CLIENT_SECRET_CICD% -e %ENVIROMENT_STAGE% -clm %USER_NAME_CLM%
+                                """
+                            } else {
+                                bat """
+                                "${PYTHON_SQUISH}" configuration.py -u %USER_NAME_ADMIN% -p %ADMIN_PASSWORD% -ci %CLIENT_ID_VV% -cs %CLIENT_SECRET_VV% -e %ENVIROMENT_STAGE% -clm %USER_NAME_CLM%
+                                """
+                            }
+                        }catch (err) {
+                            echo 'Suite Preconditions failed'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }
+
+
+
+    }
+}

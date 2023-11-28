@@ -1,0 +1,135 @@
+pipeline {
+    agent {
+        label 'cicd3_win_nhd2322w'
+    }
+    
+    options {
+        timeout(time: 3, unit: 'HOURS')   // timeout on whole pipeline job
+    }    
+
+    
+    environment {
+        PROJECT_ROOT_PATH = "c:\\example_project"
+        REPORT_FILE_NAME = "my_report.html"
+    }
+    
+    stages{
+
+        // java -Dmail.smtp.starttls.enable="true" -jar jenkins.war --httpPort=9090
+        
+        
+        stage('Ok') {
+            steps {
+                echo "Ok"
+            }
+        }
+
+        post {
+            always {
+                emailext body: 'A Test EMail', 
+                recipientProviders: [[$class: 'DevelopersRecipientProvider'], 
+                [$class: 'RequesterRecipientProvider']], 
+                subject: 'Test'
+            }
+        }
+
+
+        post {
+            always {
+                step([$class: 'Mailer', notifyEveryUnstableBuild: true,
+                    recipients: 'user@mydomain.com'])
+            }
+        }
+
+
+        post {
+            always {
+                step([$class: 'Mailer', notifyEveryUnstableBuild: true,
+                    recipients: emailextrecipients([[$class: 'CulpritsRecipientProvider'],      
+                                                    [$class: 'RequesterRecipientProvider']])])
+            }
+        }
+        
+        
+
+        // emailext body: 'something important', 
+        // replyTo: 'nenad.samardzic@gmail.com', 
+        // subject: 'test email subject', 
+        // to: 'nenad.samardzic@gmail.com'
+
+
+        emailext (
+            attachmentsPattern: "**/packages/rpm/splitted/${file}",
+            to: "${to}",
+            from: "Jenkins",
+            subject: "[jenkins] ${packageFullName}: part ${part}/${files.size()}",
+            body: "File received: \'${file}\'\n" +
+                  "From package:  \'${packageFullName}\'\n" +
+                  "Package MD5:   \'${mainMdFiveSum}\'\n" +
+                  "Jenkins Build: \'${env.BUILD_URL}\'\n"
+        )
+
+        emailext (
+            subject: "SUCCESSFUL: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+            body: """<p>SUCCESSFUL: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+            <p>Check console output at &QUOT;<a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>""",
+            recipientProviders: [[$class: 'DevelopersRecipientProvider']]
+        )
+        
+
+        post {
+            failure {
+                mail to: 'team@example.com',
+                subject: "Failed Pipeline: ${currentBuild.fullDisplayName}",
+                body: "Something is wrong with ${env.BUILD_URL}"
+            }
+        }
+
+
+        post {
+            always {
+                script { 
+                    receiver_container.stop()
+                }
+            }
+            failure {
+                sendEmail('foo@bar.com')
+            }
+            changed {
+                sendEmail('foo@bar.com')
+            }
+        }
+
+
+        post {
+            always {
+                emailext subject: '$PROJECT_NAME - Build # $BUILD_NUMBER - $BUILD_STATUS!',     
+                            recipientProviders: [requestor()],                                  
+                            replyTo: "$DEFAULT_REPLYTO",                                        
+                            body: '${SCRIPT, template="groovy-html.template"}',                 
+                            mimeType: 'text/html',
+                            presendScript: "cancel=run.getPreviousBuild().result.toString().equals(run.result.toString())"    
+            }
+        }
+
+
+        if(to != null && !to.isEmpty()) {
+            emailext(
+                body: content, mimeType: 'text/html',
+                subject: subject,
+                to: to, 
+                attachLog: true
+            )
+        }
+
+
+        
+        
+        
+        
+
+
+        
+    }
+    
+}
