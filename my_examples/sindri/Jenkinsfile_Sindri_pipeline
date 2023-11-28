@@ -45,21 +45,8 @@ pipeline {
 
         
         stage('Checkout to specific branch') {
-
-
-            triggers {
-                // MINUTE (0-59), HOUR (0-23), DAY (1-31), MONTH (1-12), DAY OF THE WEEK (0 Sunday-6 Saturday)
-                cron('H 19 * * 0-6')
-            }
-    
             options {
-                buildDiscarder(logRotator(
-                    artifactNumToKeepStr: '', 
-                    daysToKeepStr: '', 
-                    numToKeepStr: '4'))
-                disableConcurrentBuilds()
-                // disableConcurrentBuilds(abortPrevious: true)
-                timeout(time: 3, unit: 'HOURS')   // timeout on whole pipeline job
+                timeout(time: 3, unit: 'MINUTES')   // timeout on whole pipeline job
             }
 
 
