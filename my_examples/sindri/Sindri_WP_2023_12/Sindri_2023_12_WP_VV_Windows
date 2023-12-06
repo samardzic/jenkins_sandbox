@@ -1,0 +1,342 @@
+pipeline {
+    agent {
+        label 'cicd3_win_nhd2322w'
+    }
+    
+    triggers {
+        // MINUTE (0-59), HOUR (0-23), DAY (1-31), MONTH (1-12), DAY OF THE WEEK (0 Sunday-6 Saturday)
+        // cron('H 18 * * 0-6')
+        cron('Europe/Belgrade\n30 18 * * 2,4')
+    }
+    
+    options {
+        buildDiscarder(logRotator(
+            artifactNumToKeepStr: '', 
+            daysToKeepStr: '', 
+            numToKeepStr: '6'))
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+        timeout(time: 2, unit: 'HOURS')   // timeout on whole pipeline job
+    }
+    
+    parameters {
+        choice(
+            name: "TEST_SUITE", choices: ['webPortal', 'smoke', 'jnkTest', 'webShop'],
+            description: 'Available TEST SUITES for test execution')
+        choice(
+            name: "GIT_BRANCH", choices: ['main', 'development', 'active_dev'],
+            description: 'Available TEST SUITES for test execution')
+        choice(
+            name: "TEST_ENVIRONMENT", choices: ['vv', 'cicd', 'dev', 'cicd_api'],
+            description: 'Available TEST ENVIRONMENTS for test execution')
+        choice(
+            name: "TEST_BROWSER", choices: ['chrome', 'firefox', 'safari', 'ie', 'edge'],
+            description: 'Available BROWSERS for test execution')
+        choice(
+            name: "TEST_RERUNS", choices: [1, 0, 2, 3],
+            description: 'Number of TEST RERUNS for failed test')
+        booleanParam(
+            name: "GIT_CHECKOUT", 
+            defaultValue: true, 
+            description: "Pull the code from the repo.")
+        booleanParam(
+            name: "SEND_EXECUTION_RESULTS", 
+            defaultValue: false, 
+            description: "Sending email containing test execution report.")
+        booleanParam(
+            name: "RUN_HEADLESS", 
+            defaultValue: true, 
+            description: "Run tests in headless mode, without UI.")
+        booleanParam(
+            name: "PUBLISH_API_LOGS", 
+            defaultValue: false, 
+            description: "Publish API logs generated during execution.")
+    }
+    
+    environment {
+        PROJECT_ROOT_PATH = "c:\\sindri_automation"
+        ROOT_PATH = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        CUSTOM_WS = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        // VENV_PATH = "$env.ROOT_PATH\\venv38\\Scripts"
+        VENV_PATH = "$env.ROOT_PATH\\venv\\Scripts"
+        
+        // Test Suite default = "webPortal" [webPortal, emailTests, smoke, billing, integrationTests, jnkTest, webShop, deleteAPI]
+        TEST_SUITE = "jnkTest"
+
+        // Envinronment default="cicd" [vv, dev, cicd, cicd_api]
+        TEST_ENVIRONMENT = "cicd"
+        
+        // TEST_USER default="user_main" [user_main, user_jenkins, user_dragana, user_nenad, user_maja]
+        TEST_USER = "user_main"
+        
+        // TEST_BROWSER default="chrome" [chrome, firefox, safari, ie, edge]
+        TEST_BROWSER = "chrome"
+        
+        // GIT branch [main, development, active_dev]
+        GIT_BRANCH = "active_dev"
+        GIT_REPO = "https://github.geo.conti.de/CVAM/Sindri-WebPortal-Automation.git"
+
+        REPORT_FILE_NAME = "webPortal_report.html"
+        REPORT_TITLE = "Sindri_WebPortal_TEST_report"
+        REPORT_DIRECTORY = "c:\\sindri_automation\\Sindri-WebPortal-Automation\\reports\\html_reports\\"
+        
+        LOG_FILE_NAME = "test_log.zip"
+        LOG_TITLE = "Test logs"
+        LOG_DIRECTORY = "c:\\sindri_automation\\Sindri-WebPortal-Automation\\reports\\"
+        CLEAN_UP_JOB = "Sindri_WebPortal_Maintenance_Jobs/Explore_Automation"
+    }
+    
+    stages{
+        
+        
+        stage('Execute data clean-up Job') {
+            options {
+                timeout(time: 40, unit: 'MINUTES')
+            }
+            steps {
+                build job: "$env.CLEAN_UP_JOB", wait: true
+            }
+        }
+        
+        
+        
+        stage('Checkout to specific branch') {
+            options {
+                timeout(time: 7, unit: 'MINUTES')
+            }
+            
+            when {
+                expression{params.GIT_CHECKOUT == true}
+            }
+            
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                cd ${env.ROOT_PATH}
+                                git reset --hard
+                                git clean -f -d
+                                git fetch
+                                git checkout ${params.GIT_BRANCH}
+                                git pull origin ${params.GIT_BRANCH}
+                            """
+                            echo 'SVN Pull passed.'
+                        } catch (err) {
+                            echo 'SVN pull Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        stage('Install project requirements') {
+            options {
+                timeout(time: 10, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                ${env.VENV_PATH}\\pip install -r ${env.ROOT_PATH}\\requirements_311.txt
+                                ${env.VENV_PATH}\\pip list
+                            """
+                        } catch (err) {
+                            echo 'Requirements install Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+                    
+            }
+        }
+
+        
+        
+        
+        stage('Run preconfigured Test Suite') {
+            options {
+                timeout(time: 2, unit: 'HOURS')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            if (params.RUN_HEADLESS == true) {
+                                bat """
+                                    call ${env.ROOT_PATH}\\venv\\Scripts\\activate.bat
+                                    cd ${env.ROOT_PATH}
+                                    ${env.ROOT_PATH}\\venv\\Scripts\\pytest \
+                                    --reruns ${params.TEST_RERUNS} \
+                                    -m ${params.TEST_SUITE} \
+                                    --browser=${params.TEST_BROWSER} \
+                                    --env=${params.TEST_ENVIRONMENT} \
+                                    --user=${env.TEST_USER} \
+                                    -n 2 \
+                                    --headless \
+                                    --dist loadgroup
+                                """
+                                echo 'Test Suite execution initiated in HEADLESS mode.'
+                            }
+                            else{
+                                bat """
+                                    call ${env.ROOT_PATH}\\venv\\Scripts\\activate.bat
+                                    cd ${env.ROOT_PATH}
+                                    ${env.ROOT_PATH}\\venv\\Scripts\\pytest \
+                                    --reruns ${params.TEST_RERUNS} \
+                                    -m ${params.TEST_SUITE} \
+                                    --browser=${params.TEST_BROWSER} \
+                                    --env=${params.TEST_ENVIRONMENT} \
+                                    --user=${env.TEST_USER} \
+                                    -n 2 \
+                                    --dist loadgroup
+                                """
+                                echo 'Test Suite execution initiated in NON HEADLESS mode.'
+                                
+                            }
+                        } catch (err) {
+                            echo 'Test Suite execution failed to start'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                    
+                }
+            }
+        }
+        
+        
+        
+        stage('Send execution results scripted') {
+            options {
+                timeout(time: 10, unit: 'MINUTES')
+            }
+            
+            when {
+                expression{params.SEND_EXECUTION_RESULTS == true}
+            }
+            
+            steps {
+                script {
+                    try {
+                        sleep(time:10, unit:'SECONDS')
+                        bat """
+                            ${env.VENV_PATH}\\python \
+                            ${env.ROOT_PATH}\\tests\\email_tests\\send_email_results_continental_account.py
+                        """
+                        echo 'Test execution results sent.'
+                    } catch (err) {
+                        echo 'Test execution results sending failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                }
+            }
+        }
+        
+        
+        
+        stage('Send execution results built in') {
+            options {
+                timeout(time: 10, unit: 'MINUTES')
+            }
+            
+            when {
+                expression{params.SEND_EXECUTION_RESULTS == true}
+            }
+            
+            steps {
+                script {
+                    emailext( 
+                        to: "nenad.samardzic@continental-corporation.com",
+                        subject: "Web Portal Test report for ${env.TEST_ENVIRONMENT} Envinronment",
+                        body: "Hello, \n\n" +
+                              "This is Jenkins system generated Test Execution report. \n\n" +
+                              "Envinronment - ${env.TEST_ENVIRONMENT} \n" +
+                              "Git Branch - ${env.GIT_BRANCH} \n" +
+                              "Build Number - ${env.BUILD_NUMBER} \n\n" +
+                              "Please find the test results of today's test execution enclosed in attachment. \n\n" +
+                              "Regards, \n" +
+                              "Sindri VV team \n"
+                    )
+                }
+            }
+        }
+        
+        
+        
+        
+        
+        
+        
+        stage('Publish HTML report') {
+            steps {
+                script {
+                    // dir("$env.CUSTOM_WS") {
+                    try {
+                        sleep(time:3, unit:'SECONDS')
+                        publishHTML([
+                            allowMissing: false, 
+                            alwaysLinkToLastBuild: false, 
+                            keepAll: true, 
+                            reportDir: "$env.REPORT_DIRECTORY", 
+                            reportFiles: "$env.REPORT_FILE_NAME", 
+                            reportName: "Sindri_WebPortal_TEST_report", 
+                            reportTitles: "$env.REPORT_TITLE"
+                        ])
+                        echo 'HTML report Publish SUCCESS'
+                    } catch (err) {
+                        echo 'HTML report Publish FAILED'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                    // }
+                }
+            }
+        }
+        
+        
+        
+        
+        stage('Publish api logs') {
+            
+            when {
+                expression{params.PUBLISH_API_LOGS == true}
+            }
+            
+            steps {
+                script {
+                    dir("$env.LOG_DIRECTORY") {
+                        try {
+                            sleep(time:3, unit:'SECONDS')
+                            bat "tar.exe -a -cf test_log.zip log_data"
+                            publishHTML([
+                                allowMissing: false, 
+                                alwaysLinkToLastBuild: false, 
+                                keepAll: true, 
+                                reportDir: "$env.LOG_DIRECTORY", 
+                                reportFiles: "$env.LOG_FILE_NAME", 
+                                reportName: "Test Logs", 
+                                reportTitles: "$env.LOG_TITLE"
+                            ])
+                            echo 'API logs Publish SUCCESS'
+                        } catch (err) {
+                            echo 'API logs Publish FAILED'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        
+        
+        
+    }
+    
+}
