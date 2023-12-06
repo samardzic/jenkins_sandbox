@@ -24,6 +24,66 @@ pipeline {
             }
         }
 
+
+        stage('Send execution results scripted') {
+            options {
+                timeout(time: 10, unit: 'MINUTES')
+            }
+            
+            when {
+                expression{params.SEND_EXECUTION_RESULTS == true}
+            }
+            
+            steps {
+                script {
+                    try {
+                        sleep(time:10, unit:'SECONDS')
+                        bat """
+                            ${env.VENV_PATH}\\python \
+                            ${env.ROOT_PATH}\\tests\\email_tests\\send_email_results_continental_account.py
+                        """
+                        echo 'Test execution results sent.'
+                    } catch (err) {
+                        echo 'Test execution results sending failed'
+                        currentBuild.result = 'SUCCESS'
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        stage('Send execution results built in') {
+            options {
+                timeout(time: 10, unit: 'MINUTES')
+            }
+            
+            when {
+                expression{params.SEND_EXECUTION_RESULTS == true}
+            }
+            
+            steps {
+                script {
+                    emailext( 
+                        to: "nenad.samardzic@continental-corporation.com",
+                        subject: "Web Portal Test report for ${env.TEST_ENVIRONMENT} Envinronment",
+                        body: "Hello, \n\n" +
+                              "This is Jenkins system generated Test Execution report. \n\n" +
+                              "Envinronment - ${env.TEST_ENVIRONMENT} \n" +
+                              "Git Branch - ${env.GIT_BRANCH} \n" +
+                              "Build Number - ${env.BUILD_NUMBER} \n\n" +
+                              "Please find the test results of today's test execution enclosed in attachment. \n\n" +
+                              "Regards, \n" +
+                              "Sindri VV team \n"
+                    )
+                }
+            }
+        }
+
+
+
+
         post {
             always {
                 emailext body: 'A Test EMail', 

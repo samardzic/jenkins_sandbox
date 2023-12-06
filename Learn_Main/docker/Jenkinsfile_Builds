@@ -1,0 +1,297 @@
+// Import SharedLib located at https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/tree/master/vars
+@Library(['Common']) _
+
+// Declaration of a variable to store the docker image name and tag
+// (it is the only non-declarative line as it is a workaround to an issue
+// that causes agent docker parameters do not honor the current environment.
+// cf. https://issues.jenkins-ci.org/browse/JENKINS-42369)
+K8S_TOOLSET_IMAGE = 'cloud/continental/builds/k8s-toolset:1.20'
+AWS_MANAGER_IMAGE = 'cloud/continental/tools/aws-manager:2.0.0'
+AWS_TERRAFORM_IMAGE = 'cloud/continental/builds/terraform-aws:1.1.0'
+
+
+pipeline {
+  agent { label 'default' }
+
+  parameters {
+    string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Image tag to deploy')
+    choice(name: 'ENVIRONMENT', choices: ['integration', 'validation', 'production'], description: 'Target environment')
+    choice(name: 'REGION', choices: ['eu-central-1', 'us-east-1','cn-north-1'], description: 'Target AWS region')
+  }
+
+  triggers {
+    // The CD pipeline can be automatically triggered when the CI pipeline succeeded on master branch 
+    // but with this method you cannot pass the IMAGE_TAG parameter
+    // The recomanded method in this case is to trigger CD pipeline from CI : https://code.tooling.prod.cdsf.io/oam/builds.docker.jenkins-validation-job/blob/master/Jenkinsfile#L153-165
+    // upstream(upstreamProjects: OAM/oam%2Fbuilds.docker.jenkins-validation-job/master', threshold: hudson.model.Result.SUCCESS)
+    parameterizedCron('''
+        0 0 * * * %ENVIRONMENT=integration
+        15 0 * * * %ENVIRONMENT=validation
+        30 0 * * * %ENVIRONMENT=production
+        45 0 * * * %ENVIRONMENT=production;REGION=us-east-1
+        59 0 * * * %ENVIRONMENT=production;REGION=cn-north-1
+    ''')
+  }
+
+  options {
+    timeout(time: 20, unit: 'MINUTES')
+    disableConcurrentBuilds()
+    ansiColor('xterm')
+  }
+
+  environment {
+    // Project Name in Harbor, IAM and K8S RBAC
+    PROJECT_NAME = 'gtp'
+    // Docker image to be deployed to K8S 
+    IMAGE_NAME = 'cloud/continental/builds/jenkins-validation-job'
+
+    // It is recommanded to use terraform workspace to isolate your AWS ressources in all regions and environments
+    TERRAFORM_WORKSPACE = "TEST_${params.ENVIRONMENT}_${params.REGION}"
+
+    // AWS credentials are configured with configureAwsProfiles shared lib : https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/-/blob/master/vars/configureAwsProfiles.groovy
+    AWS_CONFIG_FILE = "${WORKSPACE}/.aws_config"
+    AWS_SHARED_CREDENTIALS_FILE = "${WORKSPACE}/.aws_credentials"
+
+    // Example of conditional variable declaration in jenkins, very useful to avoid scripted syntax !
+  	CONDITIONAL_EXAMPLE = "${ENVIRONMENT == "integration" ? 'integ' : 'env-' + ENVIRONMENT}"
+  }
+
+
+  stages {
+    stage('Configure AWS profiles') {
+      steps {
+        // You can customize the name displayed in the Jenkins UI to indentify the environment and region targeted by each jenkins job
+        script {
+          currentBuild.displayName = "${BUILD_DISPLAY_NAME}.${params.ENVIRONMENT}.${params.REGION}"
+        }
+        configureAwsProfiles(env.PROJECT_NAME, params.ENVIRONMENT, params.REGION)
+      }
+    }
+
+    stage('Example AWS CLI') {
+      agent {
+        docker {
+          // The CI docker registry should be always used as cache for public images in order to centralize the image download
+          image "${REPO_CI_PULL}/amazon/aws-cli"
+          // You may have to disable the entrypoint on dockerhub image because jenkins run the command "cat"
+          // It can be avoided with our own images by configuring the entrypoint to "sh" or "bash"
+          // In this case we must configure the docker user to root because we runn the "aws configure" in it
+          // which need to write in the user HOME directory
+          args "--entrypoint='' -u root"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        sh """
+          echo Request VPC list on AWS account :
+          aws ec2 describe-vpcs \
+              --profile target \
+              --region ${params.REGION} \
+              --filters Name=tag:Application,Values=K8S \
+                        Name=tag:Lower_Role,Values=${params.ENVIRONMENT} \
+                        Name=tag:Classification,Values=PROD \
+              --query 'Vpcs[].VpcId' | grep 'vpc-'
+        """
+      }
+    }
+
+    stage('Create terraform S3 bucket used for backend') {
+      agent {
+        docker {
+            image "${REPO_CI_PULL}/${AWS_MANAGER_IMAGE}"
+            alwaysPull true
+            reuseNode true
+            registryUrl "https://${REPO_CI_PULL}"
+            registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        sh """
+          AWS_PROFILE=backend /aws_manager/create_s3_bucket.sh \
+              --region eu-central-1 \
+              --tf-backend terraform/backend.tf \
+              --tags '{Key=Project,Value=GTP}, \
+                      {Key=Application,Value=Reference}, \
+                      {Key=Role,Value=CD}, \
+                      {Key=Usage,Value=Terraform_backend}, \
+                      {Key=Classification,Value=PROD}, \
+                      {Key=Program,Value=Framework}, \
+                      {Key=Owner,Value=Antoine GUESNON}, \
+                      {Key=Contact,Value=antoine.guesnon@continental-corporation.com}, \
+                      {Key=Origin,Value=${AWS_MANAGER_IMAGE}}, \
+                      {Key=Repository_Url,Value=${GIT_URL}}, \
+                      {Key=Commit_ID,Value=${GIT_COMMIT}}'
+          """
+      }
+    }
+
+    stage('Terraform Check') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/tlss/builds/terracheck"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment {
+        // Enable this environment variable if you have an issue with your terracheck analysis
+        // TR_VERBOSE = '.'
+        TF_WORKSPACE="$TERRAFORM_WORKSPACE"
+      }
+      steps {
+        dir('terraform') {
+          sh '/usr/src/app/terracheck.sh'
+        }
+      }
+    }
+    
+    stage("Create RDS") {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            # deleting local state prevent some errors due to last build cache (e.g. to avoid terraform asking you to choose a workspace interactively)
+            rm -rf .terraform
+            # Set the TF_WORKSPACE env var permit terraform to load the plugins needed in the target workspace (to avoid 'Error: Could not load plugin')
+            # echo '1' is a trick to avoid a terraform failure when workspace does not exist
+            echo '1' | TF_WORKSPACE="$TERRAFORM_WORKSPACE" terraform init -reconfigure -get=true -upgrade=true
+            terraform workspace new ${TERRAFORM_WORKSPACE} || terraform workspace select ${TERRAFORM_WORKSPACE}
+            terraform plan -var tag_repository_url=${GIT_URL} \
+                           -var tag_commit_id=${GIT_COMMIT} \
+                           -out plan_${TERRAFORM_WORKSPACE}.out
+            terraform apply -auto-approve plan_${TERRAFORM_WORKSPACE}.out
+            # -json option must be used to print sensitive output so we use jq to convert this json to properties format
+            terraform output -json | jq -r 'to_entries[]|"\\(.key)=\\(.value | .value)"' > ../k8s/base/database.properties
+          """
+        }
+      }
+    }
+
+    stage('Get K8S kubeconfig') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/mesosphere/aws-cli"
+          args "--entrypoint=''"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        sh "aws --profile backend s3 cp s3://${KUBECONFIG_S3_BUCKET}/${params.ENVIRONMENT}/${params.REGION}/projects/kubeconfig-${PROJECT_NAME}-jenkins kubeconfig.conf"
+      }
+    }
+
+    stage('Test RDS connection from K8S') {
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${K8S_TOOLSET_IMAGE}"
+          reuseNode true
+          alwaysPull true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      environment { 
+        KUBECONFIG = "${WORKSPACE}/kubeconfig.conf"
+        K8S_NAMESPACE = 'gtp-healthcheck'
+
+        // Get docker registry hostname (method from shared lib : https://code.tooling.prod.cdsf.io/oam/builds.jenkins.shared-lib.common/blob/master/vars/getDockerRegistryHostname.groovy)
+        DOCKER_REGISTRY_HOSTNAME = getDockerRegistryHostname(params.REGION, params.ENVIRONMENT)
+      }
+      steps {
+        sh '''
+          cd ./k8s/overlays/prod
+
+          echo "---------> Configuring the namespace"
+          kustomize edit set namespace ${K8S_NAMESPACE}
+
+          echo "---------> Modifing the docker image to use the one built by the CI pipeline from Harbor..."
+          kustomize edit set image governmentpaas/psql="${DOCKER_REGISTRY_HOSTNAME}/${PROJECT_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+          kustomize edit set image library/hello-world="${DOCKER_REGISTRY_HOSTNAME}/cdsf/rancher/cowsay:latest"
+
+          echo "---------> Deploying to K8S..."
+          # When applying with kubectl, we don't use the embedded version of kustomize (-k flag) because we don't know which version it is
+          # Using 'kustomize build' ensure that the same version will be used between the edit command above and the apply command
+          # The kustomize edit commands are not available in the version embedded by kubectl
+          kustomize build . | kubectl apply -f - --force
+
+          echo "---------> Waiting for the job to be completed..."
+          kubectl wait --for=condition=complete job/cd-validation --timeout=120s -n ${K8S_NAMESPACE} || sleep 60
+          POD=$(kubectl get pods -n ${K8S_NAMESPACE} --selector=job-name=cd-validation --output=jsonpath={.items..metadata.name})
+          echo Job POD = $POD
+          LOG=$(kubectl logs $POD -n ${K8S_NAMESPACE})
+          echo $LOG
+          echo $LOG | grep 'postgres' > /dev/null && echo "test OK"
+          kubectl wait --for=condition=complete job/cd-validation-proxy-cache --timeout=120s -n ${K8S_NAMESPACE} || sleep 60
+          POD2=$(kubectl get pods -n ${K8S_NAMESPACE} --selector=job-name=cd-validation-proxy-cache --output=jsonpath={.items..metadata.name})
+          echo Job POD2 = $POD2
+          LOG2=$(kubectl logs $POD2 -n ${K8S_NAMESPACE})
+          echo $LOG2
+          echo $LOG2 | grep 'cowcowricow !' > /dev/null && echo "test OK"
+        '''
+      }
+      // Clean objects
+      post {
+        always {
+          sh "kustomize build ./k8s/overlays/prod | kubectl delete -f - --force || true"
+        }
+      }
+    }
+    
+    stage('Delete RDS') {
+      when {
+        // always set beforeAgent to true if the step have both 'when' and 'agent' tags in order to prevent jenkins downloading the docker image if the step is skipped
+        beforeAgent true
+        branch 'master'
+      }
+      agent {
+        docker {
+          image "${REPO_CI_PULL}/${AWS_TERRAFORM_IMAGE}"
+          alwaysPull true
+          reuseNode true
+          registryUrl "https://${REPO_CI_PULL}"
+          registryCredentialsId "$REPO_CI_PULL_CREDENTIALS_ID"
+        }
+      }
+      steps {
+        dir('terraform') {
+          sh """
+            rm -rf .terraform
+            terraform init -reconfigure -get=true -upgrade=true
+            terraform workspace select ${TERRAFORM_WORKSPACE}
+            terraform destroy -auto-approve
+          """
+        }
+      }
+    }
+  }
+  post {
+	  failure {
+      // when is not avaliable in post stage so we exceptionally do scripted syntax here
+      script {
+        if (env.BRANCH_NAME == 'master') {
+          // Please change the slack channel to avoid spaming GTP team :)
+          // Example :
+          // slackSend channel: '#SLACK_CHANNEL_NAME', color: 'danger', message: ":jenkins-devil: Jenkins ${env.JOB_NAME} job Failed ! (<${env.BUILD_URL}console|cf log #${env.BUILD_NUMBER}>) :jenkins-devil:"
+          // Warning : Only PUBLIC channels are working !
+		      slackSend channel: '#gtp_tooling_check', color: 'danger', message: ":jenkins-devil: GTP CD validation failed for ${params.REGION}-${params.ENVIRONMENT} environment ! (<${env.BUILD_URL}console|cf log #${env.BUILD_NUMBER}>) :jenkins-devil:"
+        }
+      }
+	  }
+  }
+}

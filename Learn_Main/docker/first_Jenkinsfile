@@ -1,0 +1,51 @@
+pipeline {
+    
+    agent none
+
+
+    stages {
+
+
+        stage('Checkout') {
+            agent any
+            steps {
+                checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: '<some credentials>', url: '<a git repo>']]])
+            }
+        }
+
+
+        stage('Spin Up Receiver') {
+            agent any
+            steps {
+                script { 
+                    def receiver = docker.build("receiver",  "--rm centos7_receiver")
+                    def receiver_container = receiver.run("-d -v ${PWD}/realtime_files/station_name/201707/f/20170710_191:/DSK1/SSN/LOG0_f/17001 --network='rsync_test' --name='test_receiver'")
+                }
+            }
+        }
+
+
+        stage('Run Tests') {
+            agent { dockerfile { args '-v /etc/passwd:/etc/passwd --network="rsync_test"' } }
+            steps {
+                sh "python ./rsyncUnitTests.py"
+            }
+        }
+
+    }
+
+
+    post {
+        always {
+            script { 
+                receiver_container.stop()
+            }
+        }
+        failure {
+            sendEmail('foo@bar.com')
+        }
+        changed {
+            sendEmail('foo@bar.com')
+        }
+    }
+}
