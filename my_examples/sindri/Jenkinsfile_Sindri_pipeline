@@ -45,6 +45,7 @@ pipeline {
 
         
         stage('Checkout to specific branch') {
+            
             options {
                 timeout(time: 3, unit: 'MINUTES')   // timeout on whole pipeline job
             }
@@ -135,52 +136,7 @@ pipeline {
         }
         
         
-        
-        stage('Send execution results') {
-            options {
-                timeout(time: 80, unit: 'SECONDS')
-            }
-            steps {
-                script {
-                    try {
-                        sleep(time:10, unit:'SECONDS')
-                        bat 'c:\\sindri_automation\\sindri_webPortal\\venv\\Scripts\\python C:\\sindri_automation\\sindri_webPortal\\tests\\email_tests\\send_email_results_hardcoded.py'
-                        echo 'Test execution results sent.'
-                    } catch (err) {
-                        echo 'Test execution results sending failed'
-                        currentBuild.result = 'SUCCESS'
-                    }
-                }
-            }
-        }
-        
-        
-        
-        stage('Publish HTML report') {
-            options {
-                timeout(time: 120, unit: 'SECONDS')
-            }
-            steps {
-                script {
-                    try {
-                        sleep(time:7, unit:'SECONDS')
-                        publishHTML([
-                            allowMissing: false, 
-                            alwaysLinkToLastBuild: false, 
-                            keepAll: true, 
-                            reportDir: 'c:\\sindri_automation\\sindri_webPortal\\reports\\html_reports\\', 
-                            reportFiles: 'webPortal_report.html', 
-                            reportName: 'Sindri_WebPortal_VV_report', 
-                            reportTitles: ''
-                        ])
-                        echo 'HTML report Publish SUCCESS'
-                    } catch (err) {
-                        echo 'HTML report Publish FAILED'
-                        currentBuild.result = 'SUCCESS'
-                    }
-                }
-            }
-        }
+    
         
         
         

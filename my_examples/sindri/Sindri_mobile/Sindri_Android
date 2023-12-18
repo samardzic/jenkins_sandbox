@@ -1,0 +1,305 @@
+pipeline {
+    agent {
+        label 'cicd3_win_nhd2322w'
+    }
+    
+    
+    options {
+        timeout(time: 10, unit: 'HOURS')   // timeout on whole pipeline job
+    }
+    
+        
+    parameters {
+        choice(
+            name: "GIT_BRANCH", choices: ['refactoring', 'master', 'simulations'],
+            description: 'Available Git Branches for GIT code checkout')
+        booleanParam(
+            name: "GIT_CHECKOUT", 
+            defaultValue: false, 
+            description: "Pull the code from the repo.")
+        booleanParam(
+            name: "PRECONDITION_SUITE", 
+            defaultValue: false, 
+            description: "Precondition suite for Jenkins job.")
+        booleanParam(
+            name: "SMOKE_SUITE", 
+            defaultValue: true, 
+            description: "Run the SMOKE test suite.")
+        booleanParam(
+            name: "REGRESSION_SUITE", 
+            defaultValue: false, 
+            description: "Run the REGRESSION test suite.")
+    }
+    
+    
+    
+    environment {
+        GIT_REPO = "https://github.geo.conti.de/CVAM/Sindri-Mobile-Automation"
+        GIT_BRANCH = "refactoring"
+        REPORT_DIRECTORY = 'reports_dev'
+        CUSTOM_WS = "c:\\sindri_mobile"
+        PROPERTIES_INI = "c:\\sindri_mobile\\common\\web_api\\utilities"
+        GIT_LOCATION = '"c:\\Program Files\\Git\\bin\\git"'
+        REPORT_DIR = "c:\\sindri_mobile\\reports_dev"
+        REPORT_FILE_NAME = "index.html"
+        // PYTHON_SQUISH = "C:\\Program Files\\Squish\\python3\\python.exe"
+        PYTHON_SQUISH = "C:\\Squish\\python3\\python.exe"
+        
+        // API
+        ENVIROMENT_STAGE = "VV"
+        
+        USER_NAME_ADMIN  = credentials('admin_user')
+        ADMIN_PASSWORD  = credentials('admin_password')
+        USER_NAME_CLM  = credentials('clm_user')
+
+        CLIENT_ID_CICD  = credentials('client_id_cicd')
+        CLIENT_SECRET_CICD  = credentials('client_secret_cicd')
+
+        CLIENT_ID_VV  = credentials('client_id_vv')
+        CLIENT_SECRET_VV  = credentials('client_secret_vv')
+        
+        // email
+        HTML_SCRIPT_DIR = "c:\\sindri_mobile\\common\\methods"
+        // WORKSPACE_REPORT = "c:\\Users\\uib54845\\.jenkins\\workspace\\Sindri_Mobile_jobs\\Project_Sindri_Android_CICD_refactoring_Pipeline"
+        WORKSPACE_REPORT = "C:\\jenkins_local\\workspace\\Sindri_Mobile_jobs\\Project_Sindri_Android_CICD_refactoring_Pipeline"
+    }
+    
+    
+    
+    
+    stages{
+        
+        
+        stage('Checkout to specific branch') {
+            
+            when {
+                expression{params.GIT_CHECKOUT == true}
+            }
+            
+            options {
+                timeout(time: 5, unit: 'MINUTES')
+            }
+            
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                cd ${env.GIT_LOCATION}
+                                git reset --hard
+                                git clean -f -d
+                                git fetch
+                                git checkout ${params.GIT_BRANCH}
+                                git pull origin ${params.GIT_BRANCH}
+                                rmdir $env.REPORT_DIR /s /q
+                            """
+                        } catch (err) {
+                            echo 'GIT pull Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        stage('Start SQUISH server') {
+            options {
+                timeout(time: 2, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS"){
+                        try{
+                            sleep(time:5, unit:'SECONDS')
+                            bat 'start squishserver'
+                            sleep(time:5, unit:'SECONDS')
+                        }catch (err) {
+                            echo 'Suite Preconditions failed'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        stage('Create properties.ini') {
+            options {
+                timeout(time: 2, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.PROPERTIES_INI"){
+                        try{
+                            if (env.ENVIROMENT_STAGE=='CICD') {
+                                bat """
+                                "${PYTHON_SQUISH}" configuration.py -u %USER_NAME_ADMIN% -p %ADMIN_PASSWORD% -ci %CLIENT_ID_CICD% -cs %CLIENT_SECRET_CICD% -e %ENVIROMENT_STAGE% -clm %USER_NAME_CLM%
+                                """
+                            } else {
+                                bat """
+                                "${PYTHON_SQUISH}" configuration.py -u %USER_NAME_ADMIN% -p %ADMIN_PASSWORD% -ci %CLIENT_ID_VV% -cs %CLIENT_SECRET_VV% -e %ENVIROMENT_STAGE% -clm %USER_NAME_CLM%
+                                """
+                            }
+                        }catch (err) {
+                            echo 'Suite Preconditions failed'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        stage('Executing Suite Preconditions') {
+            when {
+                expression{params.PRECONDITION_SUITE == true}
+            }
+            options {
+                timeout(time: 60, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS"){
+                        try{
+                            sleep(time:5, unit:'SECONDS')
+                            bat """
+                            "${PYTHON_SQUISH}" tests\\suite_tag_test_runner\\tst_tag_test_runner\\test.py -m precondition --env ${env.ENVIROMENT_STAGE}
+                            """
+                            sleep(time:5, unit:'SECONDS')
+                        }catch (err) {
+                            echo 'Suite Preconditions failed'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        stage('Executing Suite Smoke') {
+            when {
+                expression{params.SMOKE_SUITE == true}
+            }
+            options {
+                timeout(time: 3, unit: 'HOURS')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS"){
+                        try{
+                            sleep(time:5, unit:'SECONDS')
+                            bat """
+                            "${PYTHON_SQUISH}" tests\\suite_tag_test_runner\\tst_tag_test_runner\\test.py -m smoke --env ${env.ENVIROMENT_STAGE}
+                            """
+                            sleep(time:5, unit:'SECONDS')
+                        }catch (err) {
+                            echo 'Suite Smoke failed'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        stage('Executing Suite Regression') {
+            when {
+                expression{params.REGRESSION_SUITE == true}
+            }
+            
+            options {
+                timeout(time: 4, unit: 'HOURS')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS"){
+                        try{
+                            sleep(time:5, unit:'SECONDS')
+                            bat """
+                            "${PYTHON_SQUISH}" tests\\suite_tag_test_runner\\tst_tag_test_runner\\test.py -m regression --env ${env.ENVIROMENT_STAGE}
+                            """
+                            sleep(time:5, unit:'SECONDS')
+                        }catch (err) {
+                            echo 'Suite Regression failed'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }    
+        
+        
+        
+        
+        stage('Publish HTML report') {
+            options {
+                timeout(time: 10, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            sleep(time:3, unit:'SECONDS')
+                            publishHTML([
+                                allowMissing: false, 
+                                alwaysLinkToLastBuild: false, 
+                                keepAll: true, 
+                                reportDir: "$env.REPORT_DIR", 
+                                reportFiles: "$env.REPORT_FILE_NAME", 
+                                reportName: "Sindri Android HTML Report Refactoring", 
+                                reportTitles: "Sindri Android Report"
+                            ])
+                            echo 'HTML report Publish SUCCESS'
+                        } catch (err) {
+                            echo 'HTML report Publish FAILED'
+                            currentBuild.result = 'FAIL'
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+        
+        
+        stage('Create report for email') {
+            options {
+                timeout(time: 2, unit: 'MINUTES')
+            }
+            steps {
+                script {
+                    dir("$env.HTML_SCRIPT_DIR"){
+                        try{
+                            bat """
+                            "${PYTHON_SQUISH}" merge_html_report.py -from ${env.REPORT_DIR} -to ${env.WORKSPACE_REPORT} -build_number ${currentBuild.number}
+                            """
+                        } catch (err) {
+                            echo 'Suite Preconditions failed'
+                            currentBuild.result = 'FAIL'
+                                }
+                        }
+                    }
+            }
+        }
+    }
+    
+    // post {
+    //     always{
+    //         archiveArtifacts artifacts: '*.html', onlyIfSuccessful: true
+    //         emailext to: "maja.knezevic@continental.com, nenad.samardzic@continental.com",
+    //         // emailext to: "nikola.2.radosavljevic@continental.com, milos.kajkut@continental.com, stefan.trninic@continental.com, maja.knezevic@continental.com, nenad.samardzic@continental.com, dragana.vidric@continental.com, dragana.jovanovic@continental.com, adrian.chicin@continental.com, cristian-andrei.pop@continental.com, claudia.bugbena@continental.com, adrian.2.roman@continental-corporation.com",
+    //         // emailext to: "nikola.2.radosavljevic@continental.com",
+    //         subject: "Jenkins Build:${currentBuild.currentResult}: ${env.JOB_NAME}",
+    //         body: "${currentBuild.currentResult}: Job ${env.JOB_NAME}\nMore Info can be found here: ${env.BUILD_URL}\n\nNOTE: In order to preview attachment please download it.",
+    //         attachmentsPattern: '*.html'
+    //     }
+    // }
+    
+}

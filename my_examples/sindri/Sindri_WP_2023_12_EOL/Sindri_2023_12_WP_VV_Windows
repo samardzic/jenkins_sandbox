@@ -36,10 +36,6 @@ pipeline {
             name: "TEST_RERUNS", choices: [1, 0, 2, 3],
             description: 'Number of TEST RERUNS for failed test')
         booleanParam(
-            name: "GIT_CHECKOUT", 
-            defaultValue: true, 
-            description: "Pull the code from the repo.")
-        booleanParam(
             name: "SEND_EXECUTION_RESULTS", 
             defaultValue: false, 
             description: "Sending email containing test execution report.")
@@ -97,16 +93,32 @@ pipeline {
                 build job: "$env.CLEAN_UP_JOB", wait: true
             }
         }
+
+
+
+        // stage('Switch WiFi to NonDomain source') {
+        // 
+        //     steps {
+        //         script {
+        //             try {
+        //                 sleep(time:120, unit:'SECONDS')
+        //                 bat 'NetSh WLAN Show All'
+        //                 sleep(time:10, unit:'SECONDS')
+        //                 bat 'netsh wlan connect name="Sindri_2G" interface="Wi-Fi"'
+        //                 echo 'WiFi Sucessfully set to NonDomain source'
+        //             } catch (err) {
+        //                 echo 'WiFi switch to NonDomain source Failed'
+        //                 currentBuild.result = 'SUCCESS'
+        //             }
+        //         }
+        //     }
+        // }
         
         
         
         stage('Checkout to specific branch') {
             options {
                 timeout(time: 7, unit: 'MINUTES')
-            }
-            
-            when {
-                expression{params.GIT_CHECKOUT == true}
             }
             
             steps {
@@ -183,7 +195,7 @@ pipeline {
                                 """
                                 echo 'Test Suite execution initiated in HEADLESS mode.'
                             }
-                            else{
+                            if (params.RUN_HEADLESS == false) {
                                 bat """
                                     call ${env.ROOT_PATH}\\venv\\Scripts\\activate.bat
                                     cd ${env.ROOT_PATH}

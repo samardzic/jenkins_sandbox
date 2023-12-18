@@ -2,6 +2,23 @@ pipeline {
     agent {
         label 'cicd3_win_nhd2322w'
     }
+
+
+    triggers {
+        // MINUTE (0-59), HOUR (0-23), DAY (1-31), MONTH (1-12), DAY OF THE WEEK (0 Sunday-6 Saturday)
+        cron('45 18 * * 0,2,4')
+    }
+
+
+    options {
+        buildDiscarder(logRotator(
+            artifactNumToKeepStr: '', 
+            daysToKeepStr: '', 
+            numToKeepStr: '6'))
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+        timeout(time: 3, unit: 'HOURS')   // timeout on whole pipeline job
+    }
     
     parameters {
         choice(
@@ -13,6 +30,9 @@ pipeline {
         choice(
             name: "TEST_ENVIRONMENT", choices: ['vv', 'cicd', 'dev', 'cicd_api'],
             description: 'Available TEST ENVIRONMENTS for test execution')
+        choice(
+            name: "TEST_RERUNS", choices: [1, 0, 2, 3],
+            description: 'Number of TEST RERUNS for failed test')
         choice(
             name: "TEST_USER", choices: ['user_main', 'user_jenkins', 'user_nenad', 'user_api', 'user_dragana', 'user_maja'],
             description: 'Available USERS for test execution')
@@ -72,6 +92,9 @@ pipeline {
         
         
         stage('Execute data clean-up Job') {
+            options {
+                timeout(time: 40, unit: 'MINUTES')
+            }
             steps {
                 build job: "$env.CLEAN_UP_JOB", wait: true
             }
@@ -79,7 +102,10 @@ pipeline {
         
         
         
-        stage('Checkout to specific branch') {
+        stage('Checkout specific branch') {
+            options {
+                timeout(time: 7, unit: 'MINUTES')
+            }
             steps {
                 script {
                     dir("$env.CUSTOM_WS") {
@@ -93,7 +119,7 @@ pipeline {
                                 git pull origin ${params.GIT_BRANCH}
                             """
                         } catch (err) {
-                            echo 'SVN pull Failed'
+                            echo 'GIT pull Failed'
                             currentBuild.result = 'SUCCESS'
                         }
                     }
@@ -105,6 +131,9 @@ pipeline {
         
 
         stage('Install project requirements') {
+            options {
+                timeout(time: 15, unit: 'MINUTES')
+            }
             steps {
                 script {
                     dir("$env.CUSTOM_WS") {
@@ -127,9 +156,9 @@ pipeline {
         
         
         stage('Run preconfigured Test Suite') {
-            // options {
-            //     timeout(time: 2, unit: 'HOURS')
-            // }
+            options {
+                timeout(time: 2, unit: 'HOURS')
+            }
             steps {
                 script {
                     dir("$env.CUSTOM_WS") {
@@ -138,13 +167,13 @@ pipeline {
                                 call ${env.ROOT_PATH}\\venv\\Scripts\\activate.bat
                                 cd ${env.ROOT_PATH}
                                 ${env.ROOT_PATH}\\venv\\Scripts\\pytest \
-                                --reruns 1 --reruns-delay 5 \
+                                --reruns ${params.TEST_RERUNS} \
                                 -m ${params.TEST_SUITE} \
                                 --browser=${params.TEST_BROWSER} \
                                 --env=${params.TEST_ENVIRONMENT} \
                                 --user=${params.TEST_USER} \
                                 --html=${env.REPORT_DIRECTORY}\\${params.REPORT_NAME} \
-                                -n 3 \
+                                -n 2 \
                                 --headless \
                                 --dist loadgroup
                             """
@@ -161,10 +190,12 @@ pipeline {
         
         
         
+
+
         
-        stage('Send execution results') {
+        stage('Send execution results scripted') {
             options {
-                timeout(time: 80, unit: 'SECONDS')
+                timeout(time: 10, unit: 'MINUTES')
             }
             
             when {
@@ -176,14 +207,45 @@ pipeline {
                     try {
                         sleep(time:10, unit:'SECONDS')
                         bat """
-                            c:\\sindri_automation\\Sindri-WebPortal-Automation\\venv\\Scripts\\python \
-                            c:\\sindri_automation\\Sindri-WebPortal-Automation\\tests\\email_tests\\send_email_results_company_account.py
+                            ${env.VENV_PATH}\\python \
+                            ${env.ROOT_PATH}\\tests\\email_tests\\send_email_results_continental_account.py
                         """
                         echo 'Test execution results sent.'
                     } catch (err) {
                         echo 'Test execution results sending failed'
                         currentBuild.result = 'SUCCESS'
                     }
+                }
+            }
+        }
+
+
+
+
+
+        stage('Send execution results') {
+            options {
+                timeout(time: 10, unit: 'MINUTES')
+            }
+            
+            when {
+                expression{params.SEND_EXECUTION_RESULTS == true}
+            }
+            
+            steps {
+                script {
+                    emailext( 
+                        to: "nenad.samardzic@continental-corporation.com",
+                        subject: "Web Portal Test report for ${env.TEST_ENVIRONMENT} Envinronment",
+                        body: "Hello, \n\n" +
+                              "This is Jenkins system generated Test Execution report. \n\n" +
+                              "Envinronment - ${env.TEST_ENVIRONMENT} \n" +
+                              "Git Branch - ${env.GIT_BRANCH} \n" +
+                              "Build Number - ${env.BUILD_NUMBER} \n\n" +
+                              "Please find the test results of today's test execution enclosed in attachment. \n\n" +
+                              "Regards, \n" +
+                              "Sindri VV team \n"
+                    )
                 }
             }
         }

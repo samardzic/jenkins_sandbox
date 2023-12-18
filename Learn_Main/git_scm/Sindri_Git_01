@@ -1,0 +1,77 @@
+pipeline {
+    agent {
+        label 'windows'
+    }
+    
+    environment {
+        PROJECT_ROOT_PATH = "c:\\sindri_automation"
+        ROOT_PATH = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        CUSTOM_WS = "$env.PROJECT_ROOT_PATH\\Sindri-WebPortal-Automation"
+        
+        
+        // GIT branch [main, development, refactoring_1]
+        // GIT_BRANCH = "*/main"
+        GIT_BRANCH = "main"
+        // GIT_REPO = "https://github.geo.conti.de/uie21143/sindri_webPortal.git"
+        GIT_REPO = "https://github.geo.conti.de/CVAM/Sindri-WebPortal-Automation.git"
+    }
+    
+    stages{
+        
+        
+        stage('Checkout to specific branch') {
+
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            git branch: "$env.GIT_BRANCH", 
+                            credentialsId: 'Github_creds_ID', 
+                            url: "$env.GIT_REPO"
+                            echo 'SVN pull SUCCESS'
+                        } catch (err) {
+                            echo 'SVN pull Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+                    
+            }
+        }
+        
+        stage('Checkout to specific branch') {
+             options {
+                timeout(time: 120, unit: 'SECONDS')
+            }
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                cd ${env.ROOT_PATH}
+                                git reset --hard
+                                git clean -f -d
+                                git fetch
+                                git checkout ${env.GIT_BRANCH}
+                                git pull origin ${env.GIT_BRANCH}
+                            """
+                        } catch (err) {
+                            echo 'SVN pull Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+                    
+            }
+        } 
+        
+        
+
+       
+
+        
+        
+        
+        
+    }
+}
