@@ -1,0 +1,97 @@
+pipeline {
+    agent any
+
+    triggers {
+        pollSCM('*/5 * * * 1-5')
+    }
+
+    options {
+        skipDefaultCheckout(true)
+        // Keep the 10 most recent builds
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+    }
+
+    environment {
+      PATH="/var/lib/jenkins/miniconda3/bin:$PATH"
+    }
+
+    stages {
+
+        stage ("Code pull"){
+            steps{
+                checkout scm
+            }
+        }
+
+        stage('Checkout to specific branch') {
+            options {
+                timeout(time: 7, unit: 'MINUTES')
+            }
+            
+            steps {
+                script {
+                    dir("$env.CUSTOM_WS") {
+                        try {
+                            bat """
+                                dotnet build
+                                dotnet test
+                                mkdir -p "${WORKSPACE}/.npm-packages"
+                                prefix=${WORKSPACE}/.npm-packages
+                                NPM_PACKAGES="${WORKSPACE}/.npm-packages"
+                                export PATH="$PATH:$NPM_PACKAGES/bin"
+                                export NODE_PATH="$NODE_PATH:$NPM_PACKAGES/lib/node_modules"
+                                npm config set prefix ${WORKSPACE}/.npm-packages
+                                npm install -g @testim/testim-cli
+                                testim --label "<YOUR LABEL>" \
+                                --token "<YOUR ACCESS TOKEN>" \
+                                --project "<YOUR PROJECT ID>" \
+                                --grid "<Your grid name>" \
+                                --report-file test-results/testim-tests-$BUILD_NUMBER-report.xml
+                                dotnet publish
+                            """
+                            echo 'SVN Pull passed.'
+                        } catch (err) {
+                            echo 'SVN pull Failed'
+                            currentBuild.result = 'SUCCESS'
+                        }
+                    }
+                }
+            }
+
+            post{
+                always{
+                    step([$class: 'CoberturaPublisher',
+                                   autoUpdateHealth: false,
+                                   autoUpdateStability: false,
+                                   coberturaReportFile: 'reports/coverage.xml',
+                                   failNoReports: false,
+                                   failUnhealthy: false,
+                                   failUnstable: false,
+                                   maxNumberOfBuilds: 10,
+                                   onlyStable: false,
+                                   sourceEncoding: 'ASCII',
+                                   zoomCoverageChart: false])
+                }
+            }
+        }
+
+
+
+
+    }
+
+    post {
+        always {
+            sh 'conda remove --yes -n ${BUILD_TAG} --all'
+        }
+        failure {
+            emailext (
+                subject: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: """<p>FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+                         <p>Check console output at &QUOT;<a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>""",
+                recipientProviders: [[$class: 'DevelopersRecipientProvider']]
+            )
+        }
+    }
+}
