@@ -1,0 +1,141 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?><flow-definition plugin="workflow-job@1400.v7fd111b_ec82f">
+  <actions>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobAction plugin="pipeline-model-definition@2.2198.v41dd8ef6dd56"/>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction plugin="pipeline-model-definition@2.2198.v41dd8ef6dd56">
+      <jobProperties>
+        <string>org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty</string>
+        <string>jenkins.model.BuildDiscarderProperty</string>
+      </jobProperties>
+      <triggers/>
+      <parameters>
+        <string>PARAMETERS_TEST</string>
+      </parameters>
+      <options/>
+    </org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction>
+  </actions>
+  <description>Jenkins Workshop Pipeline Job - Functions usage showcase:&#13;
+ - Pipeline for demonstrating the use of Jenkins functions </description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <jenkins.model.BuildDiscarderProperty>
+      <strategy class="hudson.tasks.LogRotator">
+        <daysToKeep>-1</daysToKeep>
+        <numToKeep>6</numToKeep>
+        <artifactDaysToKeep>-1</artifactDaysToKeep>
+        <artifactNumToKeep>-1</artifactNumToKeep>
+      </strategy>
+    </jenkins.model.BuildDiscarderProperty>
+    <org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>
+      <abortPrevious>false</abortPrevious>
+    </org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>PARAMETERS_TEST</name>
+          <description>Number of TEST RERUNS for failed test</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>66</string>
+              <string>0</string>
+              <string>2</string>
+              <string>3</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+    
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@3894.vd0f0248b_a_fc4">
+    <script>def add() {
+   def a=2
+   def b=3
+   def add=a+b
+   return add
+}
+
+def multiply(first_number, second_number) {
+   def multiply=first_number*second_number
+   return multiply
+}
+
+def subtract(x) {
+   def subtract=x-add()
+   return subtract
+}
+
+
+pipeline {
+
+    agent {
+        label 'nhl2283w_laptop'
+    }
+    
+
+    options {
+        buildDiscarder(logRotator(
+            artifactNumToKeepStr: '', 
+            daysToKeepStr: '', 
+            numToKeepStr: '6'))
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+        // timeout(time: 30, unit: 'MINUTES')   // timeout on whole pipeline job
+    }
+    
+    environment {
+        ENVIRONMENT_TEST = 25
+    }
+    
+    parameters {
+        choice(
+            name: "PARAMETERS_TEST", choices: [66, 0, 2, 3],
+            description: 'Number of TEST RERUNS for failed test')
+    }
+
+
+
+    stages {
+        
+        stage("Useing Jenkins Addition[add()] function") {
+            steps {
+                echo "======= Addition function result is: ${add()}"
+            }
+        }
+        
+        
+        stage("Useing Jenkins Multiplication[multiply()] function") {
+            steps {
+                echo "******* Multiplication function result is: ${multiply(2,2)}"
+            }
+        }
+        
+        
+        stage("Using Jenkins Subtraction[subtract()] function") {
+            steps {
+                echo "@@@@@@@ Subtractiontion function result is: ${subtract(14)}"
+            }
+        }
+        
+        stage("Using Jenkins functions with Envinronment and Parameters") {
+            steps {
+                script{
+                    echo "+++++++ Substraction Function with passed Envinronment value of ${env.ENVIRONMENT_TEST} is: ${subtract(env.ENVIRONMENT_TEST.toInteger())}"
+                    echo "------- Substraction Function with passed Parameter value of ${params.PARAMETERS_TEST} is: ${subtract(params.PARAMETERS_TEST.toInteger())}"
+                }
+                    
+            }
+
+            
+        }
+        
+        
+        
+        
+    }
+}
+</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>

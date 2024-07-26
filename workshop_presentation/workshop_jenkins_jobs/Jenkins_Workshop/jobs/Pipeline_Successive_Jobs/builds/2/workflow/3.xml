@@ -1,0 +1,36 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<Tag plugin="workflow-support@839.v35e2736cfd5c">
+  <node class="cps.n.StepStartNode" plugin="workflow-cps@3697.vb_470e454c232">
+    <parentIds>
+      <string>2</string>
+    </parentIds>
+    <id>3</id>
+    <descriptorId>org.jenkinsci.plugins.workflow.support.steps.ExecutorStep</descriptorId>
+  </node>
+  <actions>
+    <s.a.LogStorageAction/>
+    <cps.a.ArgumentsActionImpl plugin="workflow-cps@3697.vb_470e454c232">
+      <arguments>
+        <entry>
+          <string>label</string>
+          <string>nhl2283w_laptop</string>
+        </entry>
+      </arguments>
+      <sensitiveVariables/>
+      <isUnmodifiedBySanitization>true</isUnmodifiedBySanitization>
+    </cps.a.ArgumentsActionImpl>
+    <wf.a.TimingAction plugin="workflow-api@1223.v41b_0279c361a">
+      <startTime>1700570792355</startTime>
+    </wf.a.TimingAction>
+    <org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution_-QueueItemActionImpl plugin="workflow-durable-task-step@1247.v7f9dfea_b_4fd0">
+      <id>21</id>
+    </org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution_-QueueItemActionImpl>
+    <s.a.WorkspaceActionImpl>
+      <node></node>
+      <path>c:\Users\uia66114\.jenkins\workspace\Jenkins_Workshop\Pipeline_Successive_Jobs</path>
+      <labels class="sorted-set">
+        <hudson.model.labels.LabelAtom>nhl2283w_laptop</hudson.model.labels.LabelAtom>
+      </labels>
+    </s.a.WorkspaceActionImpl>
+  </actions>
+</Tag>

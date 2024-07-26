@@ -1,0 +1,94 @@
+def runPythonScript(){
+    workspacePath = pwd()
+    dir(workspacePath){
+        bat '''
+            python.exe .\\jenkins_training_script.py
+            '''
+    }
+}
+
+
+pipeline{
+    agent none
+    stages{
+        stage("Boolean parameter"){
+            agent {label "${JENKINS_NODE}"}
+            steps{
+                script{
+                    println("How to use boolean parameter")
+                    if (params.RUN_EXTRA_TESTS) {
+                            echo 'Run extra tests...'
+                        } else {
+                            echo 'Skip extra tests.'
+                        }
+                    }
+                }   
+        }
+        stage("String parameter"){
+            agent {label "${JENKINS_NODE}"}
+            steps{
+                script{
+                    println("How to use string parameter")
+                    println("Run tests for ${PROJECT_VERSION}")
+                }
+            }   
+        }
+        stage("Label parameter"){
+            agent {label "${CHOOSE_MACHINE}"}
+            steps{
+                script{
+                    println("How to use label parameter")
+                    println("This stage running on machine with label ${CHOOSE_MACHINE}")
+                    }
+                }   
+        }
+        stage("Git branches (and more) parameter"){
+            agent {label "${JENKINS_NODE}"}
+            steps{
+                script{
+                    println("Git branches (and more) parameter")
+                    println("Pull code from github repo ${GIT_BRANCH}")
+                    checkout([$class: 'GitSCM',
+                          branches: [[name: '${GIT_BRANCH}']],
+                          userRemoteConfigs: [[credentialsId: '1', url: 'https://github.geo.conti.de/CVAM/sensorics_validation_tool.git']]])
+                }
+            }   
+        }
+        stage("Choice parameter"){
+            agent {label "${JENKINS_NODE}"}
+            steps{
+                script{
+                    println("How to use choice parameter")
+                    switch (params.ENVIRONMENT) {
+                        case 'development':
+                            echo 'Run tests on development'
+                            break
+                        case 'staging':
+                            echo 'Run tests on staging'
+                            break
+                        case 'production':
+                            echo 'Run tests on production'
+                            break
+                    }
+                }
+            }   
+        }
+        stage("Active and reactive choice parameters"){
+            agent {label "${JENKINS_NODE}"}
+            steps{
+                script{
+                    echo "Run on ${ACTIVE_ENV} stage on ${ENV_APPLICATION_VERSION} version"
+                    }
+                }   
+        }
+        stage("Run python script"){
+            agent {label "${JENKINS_NODE}"}
+            steps{
+                script{
+                    println("How to run python script")
+                    runPythonScript()
+                    }
+                }   
+        }
+    }
+}
